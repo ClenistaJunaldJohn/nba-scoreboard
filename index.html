@@ -1,0 +1,91 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>NBA Live Scoreboard</title>
+  <link rel="stylesheet" href="style.css" />
+  <link rel="icon" href="https://cdn.nba.com/manage/2024/03/cropped-favicon-512x512-1-32x32.png" />
+</head>
+<body>
+  <!-- Header -->
+  <header class="header">
+    <div class="header-left">
+      <span class="header-title">NBA</span>
+    </div>
+  </header>
+
+  <!-- Tab Bar -->
+  <nav class="tab-bar">
+    <button class="tab active" data-tab="games">GAMES</button>
+    <button class="tab" data-tab="standings">STANDINGS</button>
+    <button class="tab" data-tab="playoffs">PLAYOFFS</button>
+  </nav>
+
+  <!-- Main Content -->
+  <main class="content">
+    <!-- Games Tab -->
+    <section id="games-tab" class="tab-content active">
+      <div id="refresh-bar" class="refresh-bar">
+        <span id="last-updated"></span>
+        <span id="countdown"></span>
+      </div>
+
+      <!-- Yesterday's Games -->
+      <div class="section-header" id="yesterday-header">Yesterday</div>
+      <div id="yesterday-games" class="games-grid">
+        <div class="loading">Loading yesterday's games...</div>
+      </div>
+
+      <!-- Today's Games -->
+      <div class="section-header" id="today-header">Today</div>
+      <div id="today-games" class="games-grid">
+        <div class="loading">Loading today's games...</div>
+      </div>
+    </section>
+
+    <!-- Standings Tab -->
+    <section id="standings-tab" class="tab-content">
+      <div class="standings-container">
+        <div class="conference-toggle">
+          <button class="conf-btn active" data-conf="east">Eastern</button>
+          <button class="conf-btn" data-conf="west">Western</button>
+        </div>
+        <div id="standings-table" class="standings-table-wrap">
+          <div class="loading">Loading standings...</div>
+        </div>
+      </div>
+    </section>
+
+    <!-- Playoffs Tab -->
+    <section id="playoffs-tab" class="tab-content"></section>
+
+    <!-- Stats Tab (placeholder) -->
+    <section id="stats-tab" class="tab-content">
+      <div class="placeholder">
+        <p>Stats coming soon</p>
+      </div>
+    </section>
+
+    <!-- Players Tab (placeholder) -->
+    <section id="players-tab" class="tab-content">
+      <div class="placeholder">
+        <p>Players coming soon</p>
+      </div>
+    </section>
+  </main>
+
+  <!-- Game Detail Modal -->
+  <div id="game-detail-modal" class="game-detail-modal hidden">
+    <div class="game-detail-backdrop"></div>
+    <div class="game-detail-panel">
+      <button class="game-detail-close">&times;</button>
+      <div id="game-detail-content" class="game-detail-content">
+        <div class="loading">Loading game details...</div>
+      </div>
+    </div>
+  </div>
+
+  <script src="app.js"></script>
+</body>
+</html>
