@@ -22,7 +22,7 @@
     <div class="tab-group">
       <button class="tab active" data-tab="games">GAMES</button>
       <button class="tab" data-tab="standings">STANDINGS</button>
-      <button class="tab" data-tab="playoffs">PLAYOFFS</button>
+      <button class="tab" data-tab="powerrankings">POWER RANKINGS</button>
     </div>
     <div class="tab-bar-right">
       <button class="tab live-tv-tab-btn" data-tab="livetv" id="watch-nba-tv-btn" title="Watch Live NBA TV Philippines">
@@ -36,39 +36,239 @@
   <main class="content">
     <!-- Games Tab -->
     <section id="games-tab" class="tab-content active">
-      <div id="refresh-bar" class="refresh-bar">
-        <span id="last-updated"></span>
-        <span id="countdown"></span>
+      <!-- Games Controls Bar (Status Filters, Search, Refresh) -->
+      <div class="games-controls-card">
+        <div class="games-controls-top">
+          <!-- Quick Status Filter Pills -->
+          <div class="games-status-pills" id="games-status-pills">
+            <button class="games-pill active" data-filter="all">🏀 All Games</button>
+            <button class="games-pill" data-filter="live"><span class="live-dot-pulse"></span> Live Now</button>
+            <button class="games-pill" data-filter="final">✅ Finished</button>
+            <button class="games-pill" data-filter="scheduled">⏰ Upcoming</button>
+          </div>
+
+          <!-- Refresh and Timer info -->
+          <div class="games-refresh-info">
+            <span id="last-updated" class="games-last-updated"></span>
+            <span id="countdown" class="games-countdown"></span>
+            <button id="manual-refresh-btn" class="games-refresh-btn" title="Refresh scoreboard now">
+              <span class="refresh-icon">🔄</span> Refresh
+            </button>
+          </div>
+        </div>
+
+        <div class="games-controls-bottom">
+          <!-- Search team in games -->
+          <div class="games-search-wrap">
+            <span class="games-search-icon">🔍</span>
+            <input type="text" id="games-team-search" class="games-search-input" placeholder="Search game by team name or city..." autocomplete="off" />
+          </div>
+
+          <!-- Section Jump Pills -->
+          <div class="games-date-jumps">
+            <button class="games-jump-btn active" data-jump="yesterday">Today's Results</button>
+            <button class="games-jump-btn" data-jump="today">Tomorrow's Schedule</button>
+          </div>
+        </div>
       </div>
 
-      <!-- Yesterday's Games -->
-      <div class="section-header" id="yesterday-header">Yesterday</div>
-      <div id="yesterday-games" class="games-grid">
-        <div class="loading">Loading yesterday's games...</div>
+      <!-- Yesterday's Games (Aired in PH Today) -->
+      <div class="games-section-wrapper" id="section-yesterday-wrap">
+        <div class="section-header-bar">
+          <div class="section-header-title">
+            <span class="section-header-badge">LIVE & RECENT</span>
+            <span class="section-header" id="yesterday-header">Today</span>
+          </div>
+          <span class="section-games-count" id="yesterday-games-count"></span>
+        </div>
+        <div id="yesterday-games" class="games-grid">
+          <div class="loading">Loading today's games...</div>
+        </div>
       </div>
 
-      <!-- Today's Games -->
-      <div class="section-header" id="today-header">Today</div>
-      <div id="today-games" class="games-grid">
-        <div class="loading">Loading today's games...</div>
+      <!-- Today's Games (Airing in PH Tomorrow) -->
+      <div class="games-section-wrapper" id="section-today-wrap">
+        <div class="section-header-bar">
+          <div class="section-header-title">
+            <span class="section-header-badge upcoming">UPCOMING</span>
+            <span class="section-header" id="today-header">Tomorrow</span>
+          </div>
+          <span class="section-games-count" id="today-games-count"></span>
+        </div>
+        <div id="today-games" class="games-grid">
+          <div class="loading">Loading tomorrow's games...</div>
+        </div>
       </div>
     </section>
 
     <!-- Standings Tab -->
     <section id="standings-tab" class="tab-content">
       <div class="standings-container">
-        <div class="conference-toggle">
-          <button class="conf-btn active" data-conf="east">Eastern</button>
-          <button class="conf-btn" data-conf="west">Western</button>
+        <!-- Standings Header & Controls -->
+        <div class="standings-header-card">
+          <div class="standings-header-info">
+            <h2 class="standings-title">NBA Conference Standings</h2>
+            <p class="standings-subtitle">Official 2026-27 Regular Season rankings, playoff berths & play-in tournament picture</p>
+          </div>
+          <!-- Conference Toggle Pills -->
+          <div class="standings-conf-switcher">
+            <button class="conf-btn active" data-conf="east" id="conf-east-btn">
+              <span class="conf-icon">🏀</span> Eastern Conference
+            </button>
+            <button class="conf-btn" data-conf="west" id="conf-west-btn">
+              <span class="conf-icon">🏀</span> Western Conference
+            </button>
+          </div>
         </div>
-        <div id="standings-table" class="standings-table-wrap">
-          <div class="loading">Loading standings...</div>
+
+        <!-- Standings Controls Bar: Search & Legend -->
+        <div class="standings-controls-bar">
+          <div class="standings-search-wrap">
+            <span class="standings-search-icon">🔍</span>
+            <input type="text" id="standings-team-search" class="standings-search-input" placeholder="Search team in standings..." autocomplete="off" />
+          </div>
+          <div class="standings-legend-mini">
+            <span class="legend-chip legend-playoff"><span class="legend-dot playoff"></span> Top 6 Playoffs</span>
+            <span class="legend-chip legend-playin"><span class="legend-dot playin"></span> 7–10 Play-In</span>
+            <span class="legend-chip legend-lottery"><span class="legend-dot lottery"></span> 11–15 Lottery</span>
+          </div>
+        </div>
+
+        <!-- Conference Leader Spotlight Banner -->
+        <div id="standings-leader-banner" class="standings-leader-banner"></div>
+
+        <!-- Main Standings Table Card -->
+        <div class="standings-card">
+          <div class="standings-card-header">
+            <div class="standings-card-title">
+              <span id="standings-conf-title">Eastern Conference Standings</span>
+              <span class="standings-teams-badge" id="standings-teams-badge">15 Teams</span>
+            </div>
+            <span class="standings-sort-hint">💡 Click any column header to sort</span>
+          </div>
+          <div id="standings-table" class="standings-table-wrap">
+            <div class="loading">Loading standings...</div>
+          </div>
         </div>
       </div>
     </section>
 
-    <!-- Playoffs Tab -->
-    <section id="playoffs-tab" class="tab-content"></section>
+    <!-- Power Rankings Tab -->
+    <section id="powerrankings-tab" class="tab-content">
+      <div class="pr-container">
+        <!-- Power Rankings Header & Sub-Tab Switcher -->
+        <div class="pr-header">
+          <div class="pr-header-info">
+            <h2 class="pr-title">NBA Power Rankings & League Leaders</h2>
+            <p class="pr-subtitle">Real-time team efficiency metrics, stats breakdowns, and individual player leaders</p>
+          </div>
+          <!-- Sub-tab switcher: Teams vs Players -->
+          <div class="pr-subtabs">
+            <button class="pr-subtab-btn active" data-pr-subtab="teams" id="pr-subtab-teams">
+              <span class="pr-subtab-icon">🏆</span> Team Rankings
+            </button>
+            <button class="pr-subtab-btn" data-pr-subtab="players" id="pr-subtab-players">
+              <span class="pr-subtab-icon">⭐</span> Player Leaders
+            </button>
+          </div>
+        </div>
+
+        <!-- Sub-view 1: Team Rankings -->
+        <div id="pr-teams-view" class="pr-subview active">
+          <!-- Team Controls: Category pills + Search + Conference Filter -->
+          <div class="pr-controls-bar">
+            <div class="pr-category-section">
+              <span class="pr-controls-label">Sort Category:</span>
+              <div class="pr-category-pills" id="team-category-pills">
+                <button class="pr-pill active" data-stat="powerScore">⚡ Power Index</button>
+                <button class="pr-pill" data-stat="ppg">Points (PPG)</button>
+                <button class="pr-pill" data-stat="rpg">Rebounds (RPG)</button>
+                <button class="pr-pill" data-stat="apg">Assists (APG)</button>
+                <button class="pr-pill" data-stat="diff">Point Diff</button>
+                <button class="pr-pill" data-stat="winPct">Win %</button>
+                <button class="pr-pill" data-stat="fgPct">FG %</button>
+                <button class="pr-pill" data-stat="threePct">3PT %</button>
+                <button class="pr-pill" data-stat="spg">Steals (SPG)</button>
+                <button class="pr-pill" data-stat="bpg">Blocks (BPG)</button>
+              </div>
+            </div>
+            <div class="pr-filters-row">
+              <div class="pr-search-wrap">
+                <span class="pr-search-icon">🔍</span>
+                <input type="text" id="pr-team-search" class="pr-search-input" placeholder="Search team by name..." autocomplete="off" />
+              </div>
+              <div class="pr-conf-filter" id="pr-team-conf-filter">
+                <button class="pr-conf-btn active" data-conf="all">All</button>
+                <button class="pr-conf-btn" data-conf="east">Eastern</button>
+                <button class="pr-conf-btn" data-conf="west">Western</button>
+              </div>
+            </div>
+          </div>
+
+          <!-- Top 3 Teams Spotlight Podium -->
+          <div id="pr-teams-podium" class="pr-podium-grid"></div>
+
+          <!-- Full Teams Table -->
+          <div class="pr-table-card">
+            <div class="pr-table-header-title">
+              <div class="pr-table-title-text">
+                <span id="pr-team-sort-label">Ranked by: <strong>Power Index</strong></span>
+                <span class="pr-team-count-badge" id="pr-team-count-badge">30 Teams</span>
+              </div>
+              <span class="pr-table-hint">💡 Click any table header to sort</span>
+            </div>
+            <div class="pr-table-wrapper" id="pr-teams-table-wrap">
+              <div class="loading">Loading Team Power Rankings...</div>
+            </div>
+          </div>
+        </div>
+
+        <!-- Sub-view 2: Player Rankings -->
+        <div id="pr-players-view" class="pr-subview">
+          <!-- Player Controls: Category pills + Search -->
+          <div class="pr-controls-bar">
+            <div class="pr-category-section">
+              <span class="pr-controls-label">Sort Category:</span>
+              <div class="pr-category-pills" id="player-category-pills">
+                <button class="pr-pill active" data-stat="pts">🔥 Scoring (PPG)</button>
+                <button class="pr-pill" data-stat="reb">Rebounds (RPG)</button>
+                <button class="pr-pill" data-stat="ast">Assists (APG)</button>
+                <button class="pr-pill" data-stat="stl">Steals (SPG)</button>
+                <button class="pr-pill" data-stat="blk">Blocks (BPG)</button>
+                <button class="pr-pill" data-stat="threePM">3PT Made (3PM)</button>
+                <button class="pr-pill" data-stat="fgPct">FG %</button>
+                <button class="pr-pill" data-stat="threePct">3PT %</button>
+                <button class="pr-pill" data-stat="ftPct">FT %</button>
+                <button class="pr-pill" data-stat="min">Minutes (MPG)</button>
+              </div>
+            </div>
+            <div class="pr-filters-row">
+              <div class="pr-search-wrap">
+                <span class="pr-search-icon">🔍</span>
+                <input type="text" id="pr-player-search" class="pr-search-input" placeholder="Search player or team..." autocomplete="off" />
+              </div>
+            </div>
+          </div>
+
+          <!-- Top 3 Players Spotlight Podium -->
+          <div id="pr-players-podium" class="pr-podium-grid"></div>
+
+          <!-- Full Players Table -->
+          <div class="pr-table-card">
+            <div class="pr-table-header-title">
+              <div class="pr-table-title-text">
+                <span id="pr-player-sort-label">Ranked by: <strong>Scoring (PPG)</strong></span>
+                <span class="pr-player-count-badge" id="pr-player-count-badge">Leaders</span>
+              </div>
+              <span class="pr-table-hint">💡 Click any table header to sort</span>
+            </div>
+            <div class="pr-table-wrapper" id="pr-players-table-wrap">
+              <div class="loading">Loading Player Leaders...</div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </section>
 
     <!-- Live TV Tab (NBA TV Philippines) -->
     <section id="livetv-tab" class="tab-content">

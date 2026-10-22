@@ -184,165 +184,313 @@ function formatGameTime(dateStr) {
   return `${hours}:${mins} ${ampm}`;
 }
 
+// ===== GAMES STATE & CONTROLS =====
+
+const gamesState = {
+  yesterdayGames: [],
+  todayGames: [],
+  statusFilter: 'all', // 'all', 'live', 'final', 'scheduled'
+  searchQuery: ''
+};
+
+function filterGame(event, filter, query) {
+  const status = event.status?.type?.state;
+  if (filter === 'live' && status !== 'in') return false;
+  if (filter === 'final' && status !== 'post') return false;
+  if (filter === 'scheduled' && status !== 'pre') return false;
+
+  if (query) {
+    const comp = event.competitions?.[0];
+    const competitors = comp?.competitors || [];
+    const textToMatch = competitors.map(c => {
+      const t = c.team || {};
+      return `${t.displayName || ''} ${t.shortDisplayName || ''} ${t.abbreviation || ''} ${t.location || ''} ${t.name || ''}`;
+    }).join(' ') + ' ' + (event.name || '');
+    if (!textToMatch.toLowerCase().includes(query)) return false;
+  }
+  return true;
+}
+
+function renderAllGames() {
+  const filteredYesterday = gamesState.yesterdayGames.filter(e => filterGame(e, gamesState.statusFilter, gamesState.searchQuery));
+  const filteredToday = gamesState.todayGames.filter(e => filterGame(e, gamesState.statusFilter, gamesState.searchQuery));
+
+  const countYesterdayEl = document.getElementById('yesterday-games-count');
+  if (countYesterdayEl) {
+    countYesterdayEl.textContent = `${filteredYesterday.length} Game${filteredYesterday.length === 1 ? '' : 's'}`;
+  }
+
+  const countTodayEl = document.getElementById('today-games-count');
+  if (countTodayEl) {
+    countTodayEl.textContent = `${filteredToday.length} Game${filteredToday.length === 1 ? '' : 's'}`;
+  }
+
+  const yesterdayEl = document.getElementById('yesterday-games');
+  if (yesterdayEl) {
+    if (filteredYesterday.length === 0) {
+      yesterdayEl.innerHTML = `<div class="no-games">${gamesState.searchQuery || gamesState.statusFilter !== 'all' ? 'No games matching filter' : 'No games yesterday'}</div>`;
+    } else {
+      yesterdayEl.innerHTML = filteredYesterday.map(e => renderGameCard(e, 'Today')).join('');
+    }
+  }
+
+  const todayEl = document.getElementById('today-games');
+  if (todayEl) {
+    if (filteredToday.length === 0) {
+      todayEl.innerHTML = `<div class="no-games">${gamesState.searchQuery || gamesState.statusFilter !== 'all' ? 'No games matching filter' : 'No games scheduled today'}</div>`;
+    } else {
+      todayEl.innerHTML = filteredToday.map(e => renderGameCard(e, 'Tomorrow')).join('');
+    }
+  }
+
+  updateLiveStreamLinks();
+}
+
+function initGamesControls() {
+  // Status filter pills
+  const pillContainer = document.getElementById('games-status-pills');
+  if (pillContainer) {
+    pillContainer.addEventListener('click', (e) => {
+      const btn = e.target.closest('.games-pill');
+      if (!btn) return;
+      pillContainer.querySelectorAll('.games-pill').forEach(p => p.classList.remove('active'));
+      btn.classList.add('active');
+      gamesState.statusFilter = btn.getAttribute('data-filter') || 'all';
+      renderAllGames();
+    });
+  }
+
+  // Search input
+  const searchInput = document.getElementById('games-team-search');
+  if (searchInput) {
+    searchInput.addEventListener('input', (e) => {
+      gamesState.searchQuery = e.target.value.trim().toLowerCase();
+      renderAllGames();
+    });
+  }
+
+  // Manual refresh button
+  const refreshBtn = document.getElementById('manual-refresh-btn');
+  if (refreshBtn) {
+    refreshBtn.addEventListener('click', async () => {
+      refreshBtn.classList.add('spinning');
+      await loadGames();
+      startCountdown();
+      setTimeout(() => refreshBtn.classList.remove('spinning'), 600);
+    });
+  }
+
+  // Section jump buttons
+  document.querySelectorAll('.games-jump-btn').forEach(btn => {
+    btn.addEventListener('click', () => {
+      document.querySelectorAll('.games-jump-btn').forEach(b => b.classList.remove('active'));
+      btn.classList.add('active');
+      const target = btn.getAttribute('data-jump');
+      const targetEl = document.getElementById(target === 'yesterday' ? 'section-yesterday-wrap' : 'section-today-wrap');
+      if (targetEl) {
+        targetEl.scrollIntoView({ behavior: 'smooth', block: 'start' });
+      }
+    });
+  });
+}
+
 // ===== RENDER GAME CARD =====
 
 function renderGameCard(event, dayLabel = 'Today') {
-  const competition = event.competitions[0];
-  const competitors = competition.competitors;
+  const competition = event.competitions?.[0] || {};
+  const competitors = competition.competitors || [];
 
   // ESPN lists home team first sometimes — normalize: [away, home]
-  const away = competitors.find(c => c.homeAway === 'away') || competitors[1];
-  const home = competitors.find(c => c.homeAway === 'home') || competitors[0];
+  const away = competitors.find(c => c.homeAway === 'away') || competitors[1] || {};
+  const home = competitors.find(c => c.homeAway === 'home') || competitors[0] || {};
 
-  const status = event.status;
-  const stateDesc = status.type.description; // "Final", "In Progress", "Scheduled"
-  const isLive = status.type.state === 'in'; 
-  const isFinal = status.type.state === 'post';
-  const isScheduled = status.type.state === 'pre';
+  const status = event.status || {};
+  const statusType = status.type || {};
+  const isLive = statusType.state === 'in';
+  const isFinal = statusType.state === 'post';
+  const isScheduled = statusType.state === 'pre';
 
-  // Extract Game Notes (Playoffs, Play-In, Series Summary, Game Number, etc.)
+  // Game notes (Playoffs, Play-In, Tournament, Series, Game Number)
   let gameNote = '';
   const eventNote = event.notes && event.notes.length > 0 ? event.notes[0].headline : '';
   const compNote = competition.notes && competition.notes.length > 0 ? competition.notes[0].headline : '';
   const seriesTitle = competition.series ? competition.series.title : '';
   const seriesSummary = competition.series ? competition.series.summary : '';
 
-  // Prefer the most descriptive note (often contains "Round Name - Game X")
-  if (eventNote) {
-    gameNote = eventNote;
-  } else if (compNote) {
-    gameNote = compNote;
-  } else if (seriesTitle) {
-    gameNote = seriesTitle;
-  }
+  if (eventNote) gameNote = eventNote;
+  else if (compNote) gameNote = compNote;
+  else if (seriesTitle) gameNote = seriesTitle;
 
-  // Append Series Standings (e.g., "BOS leads 1-0")
   if (seriesSummary) {
     gameNote = gameNote ? `${gameNote} • ${seriesSummary}` : seriesSummary;
   }
-
-  // Fallback to Season Type if no notes exist
   if (!gameNote && event.season) {
     if (event.season.type === 1) gameNote = 'Preseason';
     else if (event.season.type === 2) gameNote = 'Regular Season';
   }
 
-  const gameNoteHTML = gameNote ? `<div class="game-note" title="${gameNote}">${gameNote}</div>` : '';
+  const gameNoteHTML = gameNote ? `<span class="game-note-pill" title="${gameNote}">${gameNote}</span>` : '';
 
-  // Determine winner/loser for finished games
+  // Broadcaster
+  const broadcastName = competition.broadcasts?.[0]?.names?.[0] || 
+                        competition.geoBroadcasts?.[0]?.media?.shortName || '';
+  const broadcastHTML = broadcastName ? `<span class="game-broadcast-tag">📺 ${broadcastName}</span>` : '';
+
+  // Determine winner / loser
   let awayClass = '';
   let homeClass = '';
   let awayIndicator = '';
   let homeIndicator = '';
 
+  const awayScore = parseInt(away.score) || 0;
+  const homeScore = parseInt(home.score) || 0;
+
   if (isFinal) {
-    const awayScore = parseInt(away.score) || 0;
-    const homeScore = parseInt(home.score) || 0;
     if (awayScore > homeScore) {
       awayClass = 'winner';
       homeClass = 'loser';
       awayIndicator = '<span class="winner-indicator">◀</span>';
-    } else {
+    } else if (homeScore > awayScore) {
       homeClass = 'winner';
       awayClass = 'loser';
       homeIndicator = '<span class="winner-indicator">◀</span>';
     }
   }
 
-  // Build YouTube link for finished / live games
-  const youtubeURL = buildYouTubeLink(away, home, event.date);
-  const homeColor = getTeamColor(home);
-  const awayColor = getTeamColor(away);
-  const homeLogo = getTeamLogo(home);
+  // Records
+  const awayRecord = away.records?.[0]?.summary || away.record?.[0]?.displayValue || '';
+  const homeRecord = home.records?.[0]?.summary || home.record?.[0]?.displayValue || '';
+
+  // Logos, colors & team info
   const awayLogo = getTeamLogo(away);
+  const homeLogo = getTeamLogo(home);
+  const awayName = getTeamName(away);
+  const homeName = getTeamName(home);
+  const awayAbbr = getTeamAbbr(away);
+  const homeAbbr = getTeamAbbr(home);
 
-  // Generate a pseudo-random duration for the thumbnail (typical highlight ~10-20min)
-  const durationMin = 10 + ((event.id || '').charCodeAt(0) % 10);
-  const durationSec = (event.id || '').charCodeAt(1) % 60 || 30;
-  const durationStr = `${durationMin}:${String(durationSec).padStart(2, '0')}`;
+  // Status Badge & Action Button
+  let statusBadgeHTML = '';
+  let actionBtnHTML = '';
+  const youtubeURL = buildYouTubeLink(away, home, event.date);
 
-  // Status display
-  let statusHTML = '';
   if (isFinal) {
-    statusHTML = `
-      <div class="status-label">Final</div>
-      <div class="status-time">${dayLabel}</div>
-      <a href="${youtubeURL}" target="_blank" rel="noopener" class="yt-thumbnail" title="Watch highlights on YouTube"
-         style="background: linear-gradient(135deg, ${awayColor}, ${homeColor});">
-        <div class="yt-thumb-logos">
-          <img src="${awayLogo}" alt="" class="yt-thumb-team-logo" />
-          <img src="${homeLogo}" alt="" class="yt-thumb-team-logo" />
-        </div>
-        <div class="yt-thumb-overlay">
-          <div class="yt-thumb-label">HIGHLIGHTS</div>
-          <div class="yt-thumb-play">▶</div>
-        </div>
+    statusBadgeHTML = `<div class="game-status-badge status-final">FINAL</div>`;
+    actionBtnHTML = `
+      <a href="${youtubeURL}" target="_blank" rel="noopener" class="card-action-btn btn-highlights" title="Watch full highlights on YouTube">
+        ▶ Highlights
       </a>
     `;
   } else if (isLive) {
-    const detail = status.type.shortDetail || status.type.detail || 'LIVE';
+    const detail = statusType.shortDetail || statusType.detail || 'LIVE';
     const awaySlug = slugifyTeamName(getTeamFullName(away));
     const homeSlug = slugifyTeamName(getTeamFullName(home));
     const defaultStreamURL = buildStreamFreeURL(awaySlug, homeSlug);
-    statusHTML = `
-      <div class="status-label live">● LIVE</div>
-      <div class="status-time">${detail}</div>
+
+    statusBadgeHTML = `
+      <div class="game-status-badge status-live">
+        <span class="live-dot-pulse"></span> ${detail}
+      </div>
+    `;
+    actionBtnHTML = `
       <a href="${defaultStreamURL}" target="_blank" rel="noopener"
-         class="yt-thumbnail live-thumb checking"
+         class="card-action-btn btn-live live-thumb checking"
          data-away-slug="${awaySlug}" data-home-slug="${homeSlug}"
-         title="Watch Live Stream"
-         style="background: linear-gradient(135deg, ${awayColor}, ${homeColor});">
-        <div class="yt-thumb-logos">
-          <img src="${awayLogo}" alt="" class="yt-thumb-team-logo" />
-          <img src="${homeLogo}" alt="" class="yt-thumb-team-logo" />
-        </div>
-        <div class="yt-thumb-overlay">
-          <div class="yt-thumb-label live-label">WATCH<br>LIVE</div>
-          <div class="yt-thumb-play live-play">▶</div>
-        </div>
-        <div class="live-dot-badge">● LIVE</div>
+         title="Watch Live Stream">
+        🔴 Watch Live
       </a>
     `;
   } else {
     // Scheduled
     const gameTime = formatGameTime(event.date);
-    statusHTML = `
-      <div class="status-label">Scheduled</div>
-      <div class="status-time">${gameTime}</div>
-      <a href="${youtubeURL}" target="_blank" rel="noopener" class="yt-thumbnail preview-thumb"
-         style="background: linear-gradient(135deg, ${awayColor}, ${homeColor});">
-        <div class="yt-thumb-logos">
-          <img src="${awayLogo}" alt="" class="yt-thumb-team-logo" />
-          <img src="${homeLogo}" alt="" class="yt-thumb-team-logo" />
-        </div>
-        <div class="yt-thumb-overlay">
-          <div class="yt-thumb-label">GAME<br>PREVIEW</div>
-        </div>
+    statusBadgeHTML = `<div class="game-status-badge status-scheduled">⏰ ${gameTime}</div>`;
+    actionBtnHTML = `
+      <a href="${youtubeURL}" target="_blank" rel="noopener" class="card-action-btn btn-preview" title="Game Preview on YouTube">
+        📅 Preview
       </a>
+    `;
+  }
+
+  // Linescore Quarter Breakdown (Live or Final)
+  let linescoreHTML = '';
+  const awayLines = away.linescores || [];
+  const homeLines = home.linescores || [];
+  const numPeriods = Math.max(awayLines.length, homeLines.length);
+
+  if (!isScheduled && numPeriods > 0) {
+    const periodPills = [];
+    for (let p = 0; p < numPeriods; p++) {
+      const aVal = awayLines[p] ? (awayLines[p].value ?? awayLines[p].displayValue ?? '—') : '—';
+      const hVal = homeLines[p] ? (homeLines[p].value ?? homeLines[p].displayValue ?? '—') : '—';
+      const pLabel = p < 4 ? `Q${p + 1}` : (p === 4 ? 'OT' : `OT${p - 3}`);
+      periodPills.push(`
+        <span class="linescore-quarter">
+          <span class="linescore-q-label">${pLabel}</span>
+          <span class="linescore-q-score">${aVal}–${hVal}</span>
+        </span>
+      `);
+    }
+    linescoreHTML = `
+      <div class="game-linescore-strip">
+        <span class="linescore-q-label">Period:</span>
+        ${periodPills.join('')}
+      </div>
     `;
   }
 
   const eventId = event.id;
 
   return `
-    <div class="game-card" data-event-id="${eventId}" style="cursor:pointer;">
-      <div class="game-teams">
-        ${gameNoteHTML}
-        <div class="team-row ${awayClass}">
-          <img class="team-logo" src="${getTeamLogo(away)}" alt="${getTeamAbbr(away)}" loading="lazy" />
-          <span class="team-name">${getTeamName(away)}</span>
-          <span class="team-score">${isScheduled ? '' : getScore(away)}</span>
-          ${awayIndicator}
+    <div class="game-card ${isLive ? 'card-live' : ''}" data-event-id="${eventId}">
+      <div class="game-card-header">
+        <div class="game-card-meta-left">
+          ${broadcastHTML}
+          ${gameNoteHTML}
         </div>
+        ${statusBadgeHTML}
+      </div>
+
+      <div class="game-matchup-arena">
+        <div class="team-row ${awayClass}">
+          <div class="team-row-left">
+            <div class="team-logo-wrap">
+              <img class="team-logo" src="${awayLogo}" alt="${awayAbbr}" loading="lazy" />
+            </div>
+            <div class="team-info-box">
+              <span class="team-name">${awayName}</span>
+              ${awayRecord ? `<span class="team-record-badge">(${awayRecord})</span>` : ''}
+            </div>
+          </div>
+          <div class="team-score-box">
+            <span class="team-score">${isScheduled ? '—' : awayScore}</span>
+            ${awayIndicator}
+          </div>
+        </div>
+
         <div class="team-row ${homeClass}">
-          <img class="team-logo" src="${getTeamLogo(home)}" alt="${getTeamAbbr(home)}" loading="lazy" />
-          <span class="team-name">${getTeamName(home)}</span>
-          <span class="team-score">${isScheduled ? '' : getScore(home)}</span>
-          ${homeIndicator}
+          <div class="team-row-left">
+            <div class="team-logo-wrap">
+              <img class="team-logo" src="${homeLogo}" alt="${homeAbbr}" loading="lazy" />
+            </div>
+            <div class="team-info-box">
+              <span class="team-name">${homeName}</span>
+              ${homeRecord ? `<span class="team-record-badge">(${homeRecord})</span>` : ''}
+            </div>
+          </div>
+          <div class="team-score-box">
+            <span class="team-score">${isScheduled ? '—' : homeScore}</span>
+            ${homeIndicator}
+          </div>
         </div>
       </div>
-      <div class="game-status">
-        ${statusHTML}
+
+      ${linescoreHTML}
+
+      <div class="game-card-footer">
+        <button class="card-btn-stats" data-event-id="${eventId}" type="button">
+          📊 Box Score &amp; Details
+        </button>
+        ${actionBtnHTML}
       </div>
     </div>
   `;
@@ -400,29 +548,17 @@ async function loadGames() {
     fetchGames(todayStr)
   ]);
 
-  // Render yesterday
-  const yesterdayEl = document.getElementById('yesterday-games');
-  if (yesterdayGames.length === 0) {
-    yesterdayEl.innerHTML = '<div class="no-games">No games yesterday</div>';
-  } else {
-    yesterdayEl.innerHTML = yesterdayGames.map(e => renderGameCard(e, 'Today')).join('');
-  }
+  gamesState.yesterdayGames = yesterdayGames;
+  gamesState.todayGames = todayGames;
 
-  // Render today
-  const todayEl = document.getElementById('today-games');
-  if (todayGames.length === 0) {
-    todayEl.innerHTML = '<div class="no-games">No games scheduled today</div>';
-  } else {
-    todayEl.innerHTML = todayGames.map(e => renderGameCard(e, 'Tomorrow')).join('');
-  }
-
-  // Async-check and update all live stream buttons
-  updateLiveStreamLinks();
+  renderAllGames();
 
   // Update timestamp
   const now = new Date();
-  document.getElementById('last-updated').textContent =
-    `Last updated: ${now.toLocaleTimeString()}`;
+  const updatedEl = document.getElementById('last-updated');
+  if (updatedEl) {
+    updatedEl.textContent = `Last updated: ${now.toLocaleTimeString()}`;
+  }
 }
 
 // ===== AUTO REFRESH =====
@@ -443,94 +579,362 @@ function startCountdown() {
   }, 1000);
 }
 
-// ===== STANDINGS =====
+// ===== STANDINGS STATE & CONTROLS =====
+
+const standingsState = {
+  rawConferences: null,
+  activeConf: 'east',
+  sortKey: 'rank',
+  sortDir: 'asc',
+  searchQuery: '',
+  eventsBound: false
+};
+
+function parseRecordWins(recordStr) {
+  if (!recordStr || typeof recordStr !== 'string') return 0;
+  const parts = recordStr.split('-');
+  return parseInt(parts[0]) || 0;
+}
+
+function parseStreakNumeric(str) {
+  if (!str || typeof str !== 'string') return 0;
+  const num = parseInt(str.substring(1)) || 0;
+  return str.startsWith('W') ? num : -num;
+}
+
+function extractStandingsTeams(confObj) {
+  const entries = confObj?.standings?.entries || [];
+  const teams = entries.map((entry) => {
+    const team = entry.team || {};
+    const stats = entry.stats || [];
+
+    const getStat = (name, fallback = '—') => {
+      const s = stats.find(item => item.name === name || item.abbreviation === name);
+      return s ? (s.displayValue !== undefined ? s.displayValue : s.value) : fallback;
+    };
+
+    const getStatNum = (name, fallback = 0) => {
+      const s = stats.find(item => item.name === name || item.abbreviation === name);
+      if (!s) return fallback;
+      const v = parseFloat(s.value !== undefined ? s.value : s.displayValue);
+      return isNaN(v) ? fallback : v;
+    };
+
+    const wins = getStatNum('wins', 0);
+    const losses = getStatNum('losses', 0);
+    const pctNum = getStatNum('winPercent', wins + losses > 0 ? wins / (wins + losses) : 0);
+    const pctStr = getStat('winPercent', pctNum.toFixed(3));
+    const gb = getStat('gamesBehind', '—');
+    const gbNum = getStatNum('gamesBehind', 0);
+    const diff = getStatNum('differential', 0);
+    const playoffSeed = getStatNum('playoffSeed', 0);
+    const home = getStat('Home', '—');
+    const away = getStat('Road', getStat('Away', '—'));
+    const confRecord = getStat('vs. Conf.', getStat('Conf', '—'));
+    const divRecord = getStat('vs. Div.', getStat('Div', '—'));
+    const l10 = getStat('Last Ten Games', getStat('L10', '—'));
+    const streak = getStat('streak', '—');
+
+    return {
+      rank: 0,
+      playoffSeed,
+      id: team.id,
+      name: team.shortDisplayName || team.displayName || 'Unknown',
+      fullName: team.displayName || team.shortDisplayName || 'Unknown',
+      abbr: team.abbreviation || 'NBA',
+      logo: (team.logos && team.logos[0] ? team.logos[0].href : '') || `https://a.espn.com/i/teamlogos/nba/500/${(team.abbreviation || '').toLowerCase()}.png`,
+      wins,
+      losses,
+      pct: pctStr,
+      pctNum,
+      gb,
+      gbNum,
+      diff,
+      home,
+      homeWins: parseRecordWins(home),
+      away,
+      awayWins: parseRecordWins(away),
+      confRecord,
+      confWins: parseRecordWins(confRecord),
+      divRecord,
+      l10,
+      l10Wins: parseRecordWins(l10),
+      streak,
+      streakNumeric: parseStreakNumeric(streak)
+    };
+  });
+
+  // Sort by official NBA standings tiebreakers
+  teams.sort((a, b) => {
+    if (a.playoffSeed && b.playoffSeed && a.playoffSeed !== b.playoffSeed) {
+      return a.playoffSeed - b.playoffSeed;
+    }
+    if (b.pctNum !== a.pctNum) return b.pctNum - a.pctNum;
+    if (b.wins !== a.wins) return b.wins - a.wins;
+    if (b.diff !== a.diff) return b.diff - a.diff;
+    return a.name.localeCompare(b.name);
+  });
+
+  // Assign conference rank 1 to 15
+  teams.forEach((t, i) => { t.rank = i + 1; });
+
+  return teams;
+}
+
+function renderStandingsLeaderBanner(leaderTeam, confLabel) {
+  const bannerEl = document.getElementById('standings-leader-banner');
+  if (!bannerEl || !leaderTeam) {
+    if (bannerEl) bannerEl.innerHTML = '';
+    return;
+  }
+
+  const diffStr = leaderTeam.diff > 0 ? `+${leaderTeam.diff}` : `${leaderTeam.diff}`;
+
+  bannerEl.innerHTML = `
+    <div class="leader-banner-card">
+      <div class="leader-banner-left">
+        <img class="leader-logo" src="${leaderTeam.logo}" alt="${leaderTeam.abbr}" />
+        <div class="leader-text-box">
+          <span class="leader-badge">👑 #1 SEED • ${confLabel.toUpperCase()} LEADER</span>
+          <span class="leader-team-name">${leaderTeam.fullName}</span>
+          <span class="leader-record-str">Record: <strong>${leaderTeam.wins}–${leaderTeam.losses}</strong> (${leaderTeam.pct}) • DIFF: <strong>${diffStr}</strong> • Streak: <strong>${leaderTeam.streak}</strong></span>
+        </div>
+      </div>
+      <div class="leader-banner-right">
+        <div class="leader-stat-item">
+          <span class="leader-stat-label">WINS</span>
+          <span class="leader-stat-value">${leaderTeam.wins}</span>
+        </div>
+        <div class="leader-stat-item">
+          <span class="leader-stat-label">WIN %</span>
+          <span class="leader-stat-value">${leaderTeam.pct}</span>
+        </div>
+        <div class="leader-stat-item">
+          <span class="leader-stat-label">DIFF</span>
+          <span class="leader-stat-value">${diffStr}</span>
+        </div>
+        <div class="leader-stat-item">
+          <span class="leader-stat-label">HOME</span>
+          <span class="leader-stat-value">${leaderTeam.home}</span>
+        </div>
+        <div class="leader-stat-item">
+          <span class="leader-stat-label">AWAY</span>
+          <span class="leader-stat-value">${leaderTeam.away}</span>
+        </div>
+        <div class="leader-stat-item">
+          <span class="leader-stat-label">STREAK</span>
+          <span class="leader-stat-value">${leaderTeam.streak}</span>
+        </div>
+      </div>
+    </div>
+  `;
+}
+
+function renderStandingsTable() {
+  const tableWrap = document.getElementById('standings-table');
+  if (!tableWrap || !standingsState.rawConferences) return;
+
+  const confKeyword = standingsState.activeConf === 'east' ? 'east' : 'west';
+  const confObj = standingsState.rawConferences.find(c => {
+    const name = (c.name || c.abbreviation || '').toLowerCase();
+    return name.includes(confKeyword);
+  });
+
+  if (!confObj) {
+    tableWrap.innerHTML = '<div class="no-games">Conference standings not available</div>';
+    return;
+  }
+
+  const allTeams = extractStandingsTeams(confObj);
+  const confTitle = standingsState.activeConf === 'east' ? 'Eastern Conference' : 'Western Conference';
+
+  // Render Leader Banner for the #1 seed (original rank === 1)
+  const topTeam = allTeams.find(t => t.rank === 1) || allTeams[0];
+  renderStandingsLeaderBanner(topTeam, confTitle);
+
+  // Update Section Title & Badge
+  const titleEl = document.getElementById('standings-conf-title');
+  if (titleEl) titleEl.textContent = `${confTitle} Standings`;
+
+  // Filter teams by search
+  let displayTeams = allTeams;
+  if (standingsState.searchQuery) {
+    const q = standingsState.searchQuery;
+    displayTeams = displayTeams.filter(t =>
+      t.fullName.toLowerCase().includes(q) ||
+      t.name.toLowerCase().includes(q) ||
+      t.abbr.toLowerCase().includes(q)
+    );
+  }
+
+  const countBadge = document.getElementById('standings-teams-badge');
+  if (countBadge) {
+    countBadge.textContent = `${displayTeams.length} Team${displayTeams.length === 1 ? '' : 's'}`;
+  }
+
+  // Sort displayTeams
+  const { sortKey, sortDir } = standingsState;
+  displayTeams.sort((a, b) => {
+    let aVal = a[sortKey];
+    let bVal = b[sortKey];
+
+    // String compare for team name
+    if (typeof aVal === 'string' && typeof bVal === 'string') {
+      return sortDir === 'asc' ? aVal.localeCompare(bVal) : bVal.localeCompare(aVal);
+    }
+    // Numeric compare
+    aVal = Number(aVal) || 0;
+    bVal = Number(bVal) || 0;
+    return sortDir === 'asc' ? aVal - bVal : bVal - aVal;
+  });
+
+  // Build Table HTML
+  const columns = [
+    { key: 'rank', label: '#', align: 'th-center' },
+    { key: 'name', label: 'Team', align: 'th-left' },
+    { key: 'wins', label: 'W', align: '' },
+    { key: 'losses', label: 'L', align: '' },
+    { key: 'pctNum', label: 'PCT', align: '' },
+    { key: 'gbNum', label: 'GB', align: '' },
+    { key: 'diff', label: 'DIFF', align: '' },
+    { key: 'homeWins', label: 'HOME', align: '' },
+    { key: 'awayWins', label: 'AWAY', align: '' },
+    { key: 'confWins', label: 'CONF', align: '' },
+    { key: 'l10Wins', label: 'L10', align: '' },
+    { key: 'streakNumeric', label: 'STRK', align: '' }
+  ];
+
+  let theadHTML = '<thead><tr>';
+  columns.forEach(col => {
+    const isActive = sortKey === col.key;
+    const arrow = isActive ? (sortDir === 'asc' ? ' ▲' : ' ▼') : '';
+    theadHTML += `
+      <th class="${col.align} ${isActive ? 'active-sort' : ''}" data-sort="${col.key}">
+        ${col.label}${arrow}
+      </th>
+    `;
+  });
+  theadHTML += '</tr></thead>';
+
+  const isDefaultView = sortKey === 'rank' && sortDir === 'asc' && !standingsState.searchQuery;
+
+  let tbodyHTML = '<tbody>';
+  displayTeams.forEach((team, index) => {
+    // Cutoff divider line after #6 and #10 in default view
+    if (isDefaultView && index === 6) {
+      tbodyHTML += `
+        <tr class="standings-cutoff-row cutoff-playoff">
+          <td colspan="${columns.length}">🏆 Top 6 Guaranteed Playoff Line</td>
+        </tr>
+      `;
+    }
+    if (isDefaultView && index === 10) {
+      tbodyHTML += `
+        <tr class="standings-cutoff-row cutoff-playin">
+          <td colspan="${columns.length}">⚔️ Seeds 7–10 Play-In Tournament Line</td>
+        </tr>
+      `;
+    }
+
+    const seedClass = team.rank <= 6 ? 'seed-playoff' : (team.rank <= 10 ? 'seed-playin' : 'seed-lottery');
+    const rankBadgeClass = team.rank === 1 ? 'rank-first' : (team.rank <= 6 ? 'rank-playoff' : (team.rank <= 10 ? 'rank-playin' : ''));
+
+    const diffDisplay = team.diff > 0 ? `+${team.diff}` : `${team.diff}`;
+
+    tbodyHTML += `
+      <tr class="${seedClass}">
+        <td class="td-center ${sortKey === 'rank' ? 'sorted-standings-cell' : ''}">
+          <span class="standings-rank-badge ${rankBadgeClass}">${team.rank}</span>
+        </td>
+        <td class="td-left ${sortKey === 'name' ? 'sorted-standings-cell' : ''}">
+          <div class="standings-team">
+            <img class="standings-team-logo" src="${team.logo}" alt="${team.abbr}" loading="lazy" />
+            <span class="standings-team-name">${team.name}</span>
+            <span class="standings-team-abbr">${team.abbr}</span>
+          </div>
+        </td>
+        <td class="${sortKey === 'wins' ? 'sorted-standings-cell' : ''}">${team.wins}</td>
+        <td class="${sortKey === 'losses' ? 'sorted-standings-cell' : ''}">${team.losses}</td>
+        <td class="${sortKey === 'pctNum' ? 'sorted-standings-cell' : ''}">${team.pct}</td>
+        <td class="${sortKey === 'gbNum' ? 'sorted-standings-cell' : ''}">${team.gb}</td>
+        <td class="${sortKey === 'diff' ? 'sorted-standings-cell' : ''}">${diffDisplay}</td>
+        <td class="${sortKey === 'homeWins' ? 'sorted-standings-cell' : ''}">${team.home}</td>
+        <td class="${sortKey === 'awayWins' ? 'sorted-standings-cell' : ''}">${team.away}</td>
+        <td class="${sortKey === 'confWins' ? 'sorted-standings-cell' : ''}">${team.confRecord}</td>
+        <td class="${sortKey === 'l10Wins' ? 'sorted-standings-cell' : ''}">${team.l10}</td>
+        <td class="${sortKey === 'streakNumeric' ? 'sorted-standings-cell' : ''}">${team.streak}</td>
+      </tr>
+    `;
+  });
+  tbodyHTML += '</tbody>';
+
+  tableWrap.innerHTML = `
+    <table class="standings">
+      ${theadHTML}
+      ${tbodyHTML}
+    </table>
+  `;
+
+  // Bind column header click listeners
+  tableWrap.querySelectorAll('th[data-sort]').forEach(th => {
+    th.addEventListener('click', () => {
+      const colKey = th.getAttribute('data-sort');
+      if (standingsState.sortKey === colKey) {
+        standingsState.sortDir = standingsState.sortDir === 'asc' ? 'desc' : 'asc';
+      } else {
+        standingsState.sortKey = colKey;
+        // Default asc for rank/losses/gb, desc for other stats
+        standingsState.sortDir = (colKey === 'rank' || colKey === 'losses' || colKey === 'gbNum') ? 'asc' : 'desc';
+      }
+      renderStandingsTable();
+    });
+  });
+}
 
 async function loadStandings(conference = 'east') {
+  standingsState.activeConf = conference;
   const tableWrap = document.getElementById('standings-table');
-  tableWrap.innerHTML = '<div class="loading">Loading standings...</div>';
+  if (tableWrap && !standingsState.rawConferences) {
+    tableWrap.innerHTML = '<div class="loading">Loading standings...</div>';
+  }
 
   try {
     const res = await fetch(ESPN_STANDINGS);
     if (!res.ok) throw new Error(`HTTP ${res.status}`);
     const data = await res.json();
-
-    // ESPN standings structure: children[0] = some grouping
-    const conferences = data.children || [];
-    // Find requested conference
-    const conf = conferences.find(c => {
-      const name = (c.name || c.abbreviation || '').toLowerCase();
-      return name.includes(conference === 'east' ? 'east' : 'west');
-    });
-
-    if (!conf) {
-      tableWrap.innerHTML = '<div class="no-games">Standings not available</div>';
-      return;
-    }
-
-    // Get all teams from standings entries
-    const entries = conf.standings ? conf.standings.entries : [];
-    if (entries.length === 0) {
-      tableWrap.innerHTML = '<div class="no-games">No standings data</div>';
-      return;
-    }
-
-    // Sort by wins (find the wins stat)
-    entries.sort((a, b) => {
-      const aWins = a.stats?.find(s => s.name === 'wins')?.value || 0;
-      const bWins = b.stats?.find(s => s.name === 'wins')?.value || 0;
-      return bWins - aWins;
-    });
-
-    let html = `
-      <table class="standings">
-        <thead>
-          <tr>
-            <th>#</th>
-            <th>Team</th>
-            <th>W</th>
-            <th>L</th>
-            <th>PCT</th>
-            <th>GB</th>
-            <th>STRK</th>
-          </tr>
-        </thead>
-        <tbody>
-    `;
-
-    entries.forEach((entry, i) => {
-      const team = entry.team || {};
-      const stats = entry.stats || [];
-      const getStat = (name) => {
-        const s = stats.find(s => s.name === name);
-        return s ? (s.displayValue || s.value || '—') : '—';
-      };
-      const logo = team.logos && team.logos[0] ? team.logos[0].href : '';
-      const teamName = team.shortDisplayName || team.displayName || 'Unknown';
-
-      html += `
-        <tr>
-          <td>${i + 1}</td>
-          <td>
-            <div class="standings-team">
-              <img src="${logo}" alt="${teamName}" />
-              <span>${teamName}</span>
-            </div>
-          </td>
-          <td>${getStat('wins')}</td>
-          <td>${getStat('losses')}</td>
-          <td>${getStat('winPercent')}</td>
-          <td>${getStat('gamesBehind')}</td>
-          <td>${getStat('streak')}</td>
-        </tr>
-      `;
-    });
-
-    html += '</tbody></table>';
-    tableWrap.innerHTML = html;
-
+    standingsState.rawConferences = data.children || [];
+    renderStandingsTable();
   } catch (err) {
     console.error('Standings error:', err);
-    tableWrap.innerHTML = '<div class="no-games">Failed to load standings</div>';
+    if (tableWrap) {
+      tableWrap.innerHTML = '<div class="no-games">Failed to load standings</div>';
+    }
+  }
+}
+
+function initStandingsControls() {
+  if (standingsState.eventsBound) return;
+  standingsState.eventsBound = true;
+
+  // Conference switch buttons
+  document.addEventListener('click', (e) => {
+    const btn = e.target.closest('.conf-btn');
+    if (!btn) return;
+    document.querySelectorAll('.conf-btn').forEach(b => b.classList.remove('active'));
+    btn.classList.add('active');
+    const conf = btn.getAttribute('data-conf') || 'east';
+    standingsState.sortKey = 'rank';
+    standingsState.sortDir = 'asc';
+    loadStandings(conf);
+  });
+
+  // Standings team search
+  const searchInput = document.getElementById('standings-team-search');
+  if (searchInput) {
+    searchInput.addEventListener('input', (e) => {
+      standingsState.searchQuery = e.target.value.trim().toLowerCase();
+      renderStandingsTable();
+    });
   }
 }
 
@@ -556,9 +960,9 @@ function initTabs() {
 
       // Load data for tab if needed
       if (target === 'standings') {
-        loadStandings('east');
-      } else if (target === 'playoffs') {
-        loadPlayoffs();
+        loadStandings(standingsState.activeConf || 'east');
+      } else if (target === 'powerrankings') {
+        loadPowerRankings();
       } else if (target === 'livetv') {
         startLiveTV();
       }
@@ -571,226 +975,833 @@ function initTabs() {
   });
 }
 
-// ===== PLAYOFFS =====
+// ===== POWER RANKINGS & LEAGUE LEADERS =====
 
-function getTeamFromEntry(entry) {
-  if (!entry || !entry.team) return null;
-  const playoffSeedStat = entry.stats?.find(s => s.name === 'playoffSeed');
-  const wins = entry.stats?.find(s => s.name === 'wins')?.value || 0;
-  const losses = entry.stats?.find(s => s.name === 'losses')?.value || 0;
-  return {
-    id: entry.team.id,
-    name: entry.team.shortDisplayName || entry.team.displayName,
-    logo: entry.team.logos?.[0]?.href || '',
-    seed: playoffSeedStat ? playoffSeedStat.value : '?', // Use the playoffSeed stat value
-    record: `${wins}-${losses}`
-  };
-}
+const prState = {
+  activeSubtab: 'teams', // 'teams' | 'players'
+  teamsData: null,
+  playersData: null,
+  teamsSort: { key: 'powerScore', dir: 'desc' },
+  playersSort: { key: 'pts', dir: 'desc' },
+  teamsFilter: { conf: 'all', search: '' },
+  playersFilter: { search: '' },
+  eventsBound: false
+};
 
-function renderSeries(topSeedTeam, bottomSeedTeam, roundName, seriesName) {
-  const top = topSeedTeam || { name: 'TBD', logo: '', seed: '?', record: '' };
-  const bottom = bottomSeedTeam || { name: 'TBD', logo: '', seed: '?', record: '' };
+const TEAM_STAT_LABELS = {
+  powerScore: 'Power Index',
+  ppg: 'Points (PPG)',
+  oppPpg: 'Opponent PPG',
+  diff: 'Point Differential',
+  rpg: 'Rebounds (RPG)',
+  apg: 'Assists (APG)',
+  spg: 'Steals (SPG)',
+  bpg: 'Blocks (BPG)',
+  fgPct: 'Field Goal %',
+  threePct: '3-Point %',
+  ftPct: 'Free Throw %',
+  winPct: 'Win %',
+  wins: 'Wins',
+  losses: 'Losses',
+  streak: 'Streak',
+  gamesPlayed: 'Games Played'
+};
 
-  return `
-    <div class="bracket-series" data-round="${roundName}" data-series="${seriesName}">
-      <div class="series-teams">
-        <div class="series-team">
-          <span class="series-seed">${top.seed}</span>
-          ${top.logo ? `<img src="${top.logo}" class="series-logo" />` : '<span class="series-logo-placeholder"></span>'}
-          <span class="series-name">${top.name} ${top.record ? `<span class="team-record">(${top.record})</span>` : ''}</span>
-        </div>
-        <div class="series-team">
-          <span class="series-seed">${bottom.seed}</span>
-          ${bottom.logo ? `<img src="${bottom.logo}" class="series-logo" />` : '<span class="series-logo-placeholder"></span>'}
-          <span class="series-name">${bottom.name} ${bottom.record ? `<span class="team-record">(${bottom.record})</span>` : ''}</span>
-        </div>
-      </div>
-      <div class="series-connector"></div>
-    </div>
-  `;
-}
+const PLAYER_STAT_LABELS = {
+  pts: 'Scoring (PPG)',
+  reb: 'Rebounds (RPG)',
+  ast: 'Assists (APG)',
+  stl: 'Steals (SPG)',
+  blk: 'Blocks (BPG)',
+  threePM: '3PT Made (3PM)',
+  fgPct: 'Field Goal %',
+  threePct: '3-Point %',
+  ftPct: 'Free Throw %',
+  min: 'Minutes (MPG)',
+  to: 'Turnovers (TOPG)',
+  gp: 'Games Played'
+};
 
-function renderPlayIn(conferenceName, teams) {
-  const team7 = teams.find(t => t.seed == 7);
-  const team8 = teams.find(t => t.seed == 8);
-  const team9 = teams.find(t => t.seed == 9);
-  const team10 = teams.find(t => t.seed == 10);
+async function loadPowerRankings() {
+  initPowerRankingsEvents();
 
-  if (!team7 || !team8 || !team9 || !team10) {
-    return '<div class="play-in-container"><p>Play-In teams not yet determined.</p></div>';
-  }
-
-  return `
-    <div class="play-in-container">
-      <h4 class="play-in-title">${conferenceName} Play-In Tournament</h4>
-      <div class="play-in-bracket">
-        <div class="play-in-matchup">
-          <div class="play-in-header">7-vs-8 Game (Winner is 7th Seed)</div>
-          ${renderSeries(team7, team8, 'play-in', '7v8')}
-        </div>
-        <div class="play-in-matchup">
-          <div class="play-in-header">9-vs-10 Game (Loser is Eliminated)</div>
-          ${renderSeries(team9, team10, 'play-in', '9v10')}
-        </div>
-        <div class="play-in-matchup">
-          <div class="play-in-header">Final Game (Winner is 8th Seed)</div>
-          <div class="bracket-series" data-round="play-in" data-series="final">
-            <div class="series-teams">
-              <div class="series-team"><span class="series-name">Loser of 7-vs-8</span></div>
-              <div class="series-team"><span class="series-name">Winner of 9-vs-10</span></div>
-            </div>
-          </div>
-        </div>
-      </div>
-    </div>
-  `;
-}
-
-function renderConferenceBracket(conferenceName, teams, align = 'left') {
-  const team1 = teams.find(t => t.seed == 1);
-  const team2 = teams.find(t => t.seed == 2);
-  const team3 = teams.find(t => t.seed == 3);
-  const team4 = teams.find(t => t.seed == 4);
-  const team5 = teams.find(t => t.seed == 5);
-  const team6 = teams.find(t => t.seed == 6);
-  // Seeds 7 and 8 are determined by the play-in
-  const team7 = { name: 'Play-In Winner', logo: '', seed: 7 };
-  const team8 = { name: 'Play-In Winner', logo: '', seed: 8 };
-
-  return `
-    <div class="playoff-conference-bracket align-${align}">
-      <h3 class="conference-bracket-title">${conferenceName} Conference</h3>
-      <div class="bracket-body">
-        <div class="bracket-round">
-          <h4 class="bracket-round-title">First Round</h4>
-          ${renderSeries(team1, team8, 'round1', '1v8')}
-          ${renderSeries(team4, team5, 'round1', '4v5')}
-          ${renderSeries(team3, team6, 'round1', '3v6')}
-          ${renderSeries(team2, team7, 'round1', '2v7')}
-        </div>
-        <div class="bracket-round">
-          <h4 class="bracket-round-title">Conf. Semifinals</h4>
-          ${renderSeries(null, null, 'round2', 'semi1')}
-          ${renderSeries(null, null, 'round2', 'semi2')}
-        </div>
-        <div class="bracket-round">
-          <h4 class="bracket-round-title">Conf. Finals</h4>
-          ${renderSeries(null, null, 'round3', 'final')}
-        </div>
-      </div>
-    </div>
-  `;
-}
-
-async function loadPlayoffs() {
-  const contentEl = document.getElementById('playoffs-tab');
-  contentEl.innerHTML = '<div class="loading">Loading Playoff Picture...</div>';
-
-  try {
-    const res = await fetch(ESPN_STANDINGS);
-    if (!res.ok) throw new Error(`HTTP ${res.status}`);
-    const data = await res.json();
-
-    const conferences = data.children || [];
-    const eastConf = conferences.find(c => {
-      const name = (c.name || c.abbreviation || '').toLowerCase();
-      return name.includes('east');
-    });
-    const westConf = conferences.find(c => {
-      const name = (c.name || c.abbreviation || '').toLowerCase();
-      return name.includes('west');
-    });
-
-    if (!eastConf || !westConf) {
-      contentEl.innerHTML = '<div class="no-games">Playoff data not available.</div>';
-      return;
-    }
-
-    const eastTeams = (eastConf.standings?.entries || []).map(getTeamFromEntry);
-    const westTeams = (westConf.standings?.entries || []).map(getTeamFromEntry);
-
-    // Sort by seed just in case API order is not guaranteed
-    eastTeams.sort((a, b) => a.seed - b.seed);
-    westTeams.sort((a, b) => a.seed - b.seed);
-
-    const finalsHTML = `
-      <div class="nba-finals-bracket">
-        <h3 class="conference-bracket-title">NBA Finals</h3>
-        <div class="bracket-body">
-          <div class="bracket-round">
-            <h4 class="bracket-round-title">West Champ</h4>
-            <div class="bracket-series" data-round="finals">
-              <div class="series-teams">
-                <div class="series-team single-team-spot">
-                  <span class="series-logo-placeholder"></span>
-                  <span class="series-name">TBD</span>
-                </div>
-              </div>
-              <div class="series-connector"></div>
-            </div>
-          </div>
-          <div class="bracket-round champion">
-             <h4 class="bracket-round-title">NBA Champion</h4>
-             <div class="bracket-series">
-                <div class="series-teams">
-                  <div class="series-team champion-spot">
-                    <span class="series-logo-placeholder"></span>
-                    <span class="series-name">TBD</span>
-                  </div>
-                </div>
-             </div>
-          </div>
-          <div class="bracket-round align-right">
-            <h4 class="bracket-round-title">East Champ</h4>
-            <div class="bracket-series" data-round="finals">
-              <div class="series-connector"></div>
-              <div class="series-teams">
-                <div class="series-team single-team-spot">
-                  <span class="series-logo-placeholder"></span>
-                  <span class="series-name">TBD</span>
-                </div>
-              </div>
-            </div>
-          </div>
-        </div>
-      </div>
-    `;
-
-    contentEl.innerHTML = `
-      <div class="playoff-header">
-        <h2>NBA Playoff Picture</h2>
-        <p>Based on current standings. This is a projection and not the official bracket until standings are final.</p>
-      </div>
-      <div class="play-in-section">
-        ${renderPlayIn('Western', westTeams)}
-        ${renderPlayIn('Eastern', eastTeams)}
-      </div>
-      <div class="playoff-scroll-wrapper">
-        <div class="playoff-bracket-section">
-          ${renderConferenceBracket('Western', westTeams, 'left')}
-          ${finalsHTML}
-          ${renderConferenceBracket('Eastern', eastTeams, 'right')}
-        </div>
-      </div>
-    `;
-
-  } catch (err) {
-    console.error('Playoffs error:', err);
-    contentEl.innerHTML = '<div class="no-games">Failed to load playoff picture.</div>';
+  if (prState.activeSubtab === 'teams') {
+    await ensureTeamsDataLoaded();
+    renderTeamsView();
+  } else {
+    await ensurePlayersDataLoaded();
+    renderPlayersView();
   }
 }
 
-// ===== CONFERENCE TOGGLE =====
+function initPowerRankingsEvents() {
+  if (prState.eventsBound) return;
+  prState.eventsBound = true;
 
-function initConferenceToggle() {
+  // Subtab buttons (Teams vs Players)
+  const subtabTeams = document.getElementById('pr-subtab-teams');
+  const subtabPlayers = document.getElementById('pr-subtab-players');
+  const viewTeams = document.getElementById('pr-teams-view');
+  const viewPlayers = document.getElementById('pr-players-view');
+
+  if (subtabTeams && subtabPlayers) {
+    subtabTeams.addEventListener('click', async () => {
+      prState.activeSubtab = 'teams';
+      subtabTeams.classList.add('active');
+      subtabPlayers.classList.remove('active');
+      if (viewTeams) viewTeams.classList.add('active');
+      if (viewPlayers) viewPlayers.classList.remove('active');
+      await ensureTeamsDataLoaded();
+      renderTeamsView();
+    });
+
+    subtabPlayers.addEventListener('click', async () => {
+      prState.activeSubtab = 'players';
+      subtabPlayers.classList.add('active');
+      subtabTeams.classList.remove('active');
+      if (viewPlayers) viewPlayers.classList.add('active');
+      if (viewTeams) viewTeams.classList.remove('active');
+      await ensurePlayersDataLoaded();
+      renderPlayersView();
+    });
+  }
+
+  // Category Pills - Teams
+  const teamPillsWrap = document.getElementById('team-category-pills');
+  if (teamPillsWrap) {
+    teamPillsWrap.addEventListener('click', (e) => {
+      const pill = e.target.closest('.pr-pill');
+      if (!pill) return;
+      const stat = pill.getAttribute('data-stat');
+      if (!stat) return;
+
+      teamPillsWrap.querySelectorAll('.pr-pill').forEach(p => p.classList.remove('active'));
+      pill.classList.add('active');
+
+      prState.teamsSort.key = stat;
+      prState.teamsSort.dir = 'desc';
+      renderTeamsView();
+    });
+  }
+
+  // Category Pills - Players
+  const playerPillsWrap = document.getElementById('player-category-pills');
+  if (playerPillsWrap) {
+    playerPillsWrap.addEventListener('click', (e) => {
+      const pill = e.target.closest('.pr-pill');
+      if (!pill) return;
+      const stat = pill.getAttribute('data-stat');
+      if (!stat) return;
+
+      playerPillsWrap.querySelectorAll('.pr-pill').forEach(p => p.classList.remove('active'));
+      pill.classList.add('active');
+
+      prState.playersSort.key = stat;
+      prState.playersSort.dir = 'desc';
+      renderPlayersView();
+    });
+  }
+
+  // Conference Filter - Teams
+  const confFilterWrap = document.getElementById('pr-team-conf-filter');
+  if (confFilterWrap) {
+    confFilterWrap.addEventListener('click', (e) => {
+      const btn = e.target.closest('.pr-conf-btn');
+      if (!btn) return;
+      confFilterWrap.querySelectorAll('.pr-conf-btn').forEach(b => b.classList.remove('active'));
+      btn.classList.add('active');
+      prState.teamsFilter.conf = btn.getAttribute('data-conf') || 'all';
+      renderTeamsView();
+    });
+  }
+
+  // Search Input - Teams
+  const teamSearch = document.getElementById('pr-team-search');
+  if (teamSearch) {
+    teamSearch.addEventListener('input', (e) => {
+      prState.teamsFilter.search = e.target.value.trim().toLowerCase();
+      renderTeamsView();
+    });
+  }
+
+  // Search Input - Players
+  const playerSearch = document.getElementById('pr-player-search');
+  if (playerSearch) {
+    playerSearch.addEventListener('input', (e) => {
+      prState.playersFilter.search = e.target.value.trim().toLowerCase();
+      renderPlayersView();
+    });
+  }
+
+  // Table header clicks for dynamic sorting (delegation)
   document.addEventListener('click', (e) => {
-    if (e.target.classList.contains('conf-btn')) {
-      document.querySelectorAll('.conf-btn').forEach(b => b.classList.remove('active'));
-      e.target.classList.add('active');
-      loadStandings(e.target.getAttribute('data-conf'));
+    const th = e.target.closest('th[data-sort]');
+    if (!th) return;
+
+    const tableWrap = th.closest('.pr-table-wrapper');
+    if (!tableWrap) return;
+
+    const isTeamsTable = tableWrap.id === 'pr-teams-table-wrap';
+    const isPlayersTable = tableWrap.id === 'pr-players-table-wrap';
+    const sortKey = th.getAttribute('data-sort');
+    if (!sortKey) return;
+
+    if (isTeamsTable) {
+      if (prState.teamsSort.key === sortKey) {
+        prState.teamsSort.dir = prState.teamsSort.dir === 'desc' ? 'asc' : 'desc';
+      } else {
+        prState.teamsSort.key = sortKey;
+        prState.teamsSort.dir = 'desc';
+      }
+      // Sync pill if available
+      syncPillState('team-category-pills', sortKey);
+      renderTeamsView();
+    } else if (isPlayersTable) {
+      if (prState.playersSort.key === sortKey) {
+        prState.playersSort.dir = prState.playersSort.dir === 'desc' ? 'asc' : 'desc';
+      } else {
+        prState.playersSort.key = sortKey;
+        prState.playersSort.dir = 'desc';
+      }
+      // Sync pill if available
+      syncPillState('player-category-pills', sortKey);
+      renderPlayersView();
     }
   });
 }
+
+function syncPillState(containerId, activeStat) {
+  const wrap = document.getElementById(containerId);
+  if (!wrap) return;
+  wrap.querySelectorAll('.pr-pill').forEach(pill => {
+    if (pill.getAttribute('data-stat') === activeStat) {
+      pill.classList.add('active');
+    } else {
+      pill.classList.remove('active');
+    }
+  });
+}
+
+// Data Fetchers with Server + ESPN Direct Fallback
+async function ensureTeamsDataLoaded() {
+  if (prState.teamsData) return;
+
+  const tableWrap = document.getElementById('pr-teams-table-wrap');
+  if (tableWrap) tableWrap.innerHTML = '<div class="loading">Loading Team Power Rankings...</div>';
+
+  try {
+    const res = await fetch('/api/power-rankings/teams');
+    if (!res.ok) throw new Error(`HTTP ${res.status}`);
+    const data = await res.json();
+    if (Array.isArray(data) && data.length > 0) {
+      prState.teamsData = data;
+      return;
+    }
+    throw new Error('Empty team data received');
+  } catch (err) {
+    console.warn('Backend /api/power-rankings/teams failed, using direct ESPN client fallback:', err.message);
+    prState.teamsData = await fetchTeamsClientFallback();
+  }
+}
+
+async function fetchTeamsClientFallback() {
+  try {
+    const res = await fetch(ESPN_STANDINGS);
+    if (!res.ok) throw new Error(`ESPN Standings HTTP ${res.status}`);
+    const data = await res.json();
+    const teams = [];
+
+    (data.children || []).forEach(conf => {
+      const confName = (conf.name || conf.abbreviation || '').toLowerCase().includes('east') ? 'Eastern' : 'Western';
+      (conf.standings?.entries || []).forEach(entry => {
+        const team = entry.team || {};
+        const statsMap = {};
+        (entry.stats || []).forEach(s => { statsMap[s.name] = s.value; });
+
+        const wins = statsMap.wins || 0;
+        const losses = statsMap.losses || 0;
+        const winPct = statsMap.winPercent !== undefined ? statsMap.winPercent : (wins + losses > 0 ? wins / (wins + losses) : 0);
+        const diff = statsMap.differential !== undefined ? statsMap.differential : 0;
+        const ppg = statsMap.avgPointsFor || 0;
+        const oppPpg = statsMap.avgPointsAgainst || 0;
+        const streak = statsMap.streak || 0;
+
+        const powerScore = Math.max(0, Math.round(
+          (winPct * 45) + (diff * 1.5) + (ppg * 0.25)
+        * 10) / 10);
+
+        teams.push({
+          id: team.id,
+          name: team.shortDisplayName || team.name || 'Unknown',
+          fullName: team.displayName || team.shortDisplayName || 'Unknown',
+          abbreviation: team.abbreviation || 'NBA',
+          logo: (team.logos && team.logos[0] && team.logos[0].href) || `https://a.espn.com/i/teamlogos/nba/500/${(team.abbreviation || '').toLowerCase()}.png`,
+          conference: confName,
+          wins,
+          losses,
+          winPct: Math.round(winPct * 1000) / 1000,
+          streak: streak > 0 ? `W${streak}` : streak < 0 ? `L${Math.abs(streak)}` : '—',
+          diff: Math.round(diff * 10) / 10,
+          ppg: Math.round(ppg * 10) / 10,
+          oppPpg: Math.round(oppPpg * 10) / 10,
+          rpg: 0,
+          apg: 0,
+          spg: 0,
+          bpg: 0,
+          fgPct: 0,
+          threePct: 0,
+          ftPct: 0,
+          gamesPlayed: wins + losses || 1,
+          powerScore
+        });
+      });
+    });
+
+    teams.sort((a, b) => b.powerScore - a.powerScore);
+    teams.forEach((t, i) => { t.rank = i + 1; });
+    return teams;
+  } catch (e) {
+    console.error('Client fallback failed for teams:', e);
+    return [];
+  }
+}
+
+async function ensurePlayersDataLoaded() {
+  if (prState.playersData) return;
+
+  const tableWrap = document.getElementById('pr-players-table-wrap');
+  if (tableWrap) tableWrap.innerHTML = '<div class="loading">Loading Player Leaders...</div>';
+
+  try {
+    const res = await fetch('/api/power-rankings/players');
+    if (!res.ok) throw new Error(`HTTP ${res.status}`);
+    const data = await res.json();
+    if (Array.isArray(data) && data.length > 0) {
+      prState.playersData = data;
+      return;
+    }
+    throw new Error('Empty player data received');
+  } catch (err) {
+    console.warn('Backend /api/power-rankings/players failed, using direct ESPN client fallback:', err.message);
+    prState.playersData = await fetchPlayersClientFallback();
+  }
+}
+
+async function fetchPlayersClientFallback() {
+  try {
+    const url = 'https://site.web.api.espn.com/apis/common/v3/sports/basketball/nba/statistics/byathlete?limit=150';
+    const res = await fetch(url);
+    if (!res.ok) throw new Error(`ESPN API HTTP ${res.status}`);
+    const data = await res.json();
+
+    const catDefs = {};
+    (data.categories || []).forEach(c => { catDefs[c.name] = c.names; });
+
+    const players = (data.athletes || []).map(item => {
+      const a = item.athlete || {};
+      const team = (a.teams && a.teams[0]) ? a.teams[0] : {};
+      const stats = {};
+      (item.categories || []).forEach(c => {
+        const names = catDefs[c.name] || [];
+        names.forEach((name, i) => {
+          const raw = c.totals && c.totals[i] !== undefined ? c.totals[i] : (c.values && c.values[i] !== undefined ? c.values[i] : 0);
+          const val = parseFloat(raw);
+          stats[name] = isNaN(val) ? 0 : val;
+        });
+      });
+
+      return {
+        id: a.id,
+        name: a.displayName || 'Unknown Player',
+        shortName: a.shortName || a.displayName || '',
+        headshot: (a.headshot && a.headshot.href) || `https://a.espncdn.com/combiner/i?img=/i/headshots/nba/players/full/${a.id}.png&w=350&h=254`,
+        jersey: a.jersey ? `#${a.jersey}` : '',
+        position: (a.position && a.position.abbreviation) || '—',
+        team: {
+          id: team.id || a.teamId || '',
+          name: team.shortDisplayName || team.name || a.teamShortName || 'NBA',
+          fullName: team.displayName || a.teamName || 'NBA',
+          abbreviation: team.abbreviation || 'NBA',
+          logo: (team.logos && team.logos[0] && team.logos[0].href) || (a.teamLogos && a.teamLogos[0] && a.teamLogos[0].href) || `https://a.espn.com/i/teamlogos/nba/500/${(team.abbreviation || '').toLowerCase()}.png`
+        },
+        stats: {
+          pts: Math.round((stats.avgPoints || 0) * 10) / 10,
+          reb: Math.round((stats.avgRebounds || 0) * 10) / 10,
+          ast: Math.round((stats.avgAssists || 0) * 10) / 10,
+          stl: Math.round((stats.avgSteals || 0) * 10) / 10,
+          blk: Math.round((stats.avgBlocks || 0) * 10) / 10,
+          threePM: Math.round((stats.avgThreePointFieldGoalsMade || 0) * 10) / 10,
+          fgPct: Math.round((stats.fieldGoalPct || 0) * 10) / 10,
+          threePct: Math.round((stats.threePointFieldGoalPct || 0) * 10) / 10,
+          ftPct: Math.round((stats.freeThrowPct || 0) * 10) / 10,
+          min: Math.round((stats.avgMinutes || 0) * 10) / 10,
+          to: Math.round((stats.avgTurnovers || 0) * 10) / 10,
+          gp: stats.gamesPlayed || 0
+        }
+      };
+    });
+
+    players.sort((a, b) => b.stats.pts - a.stats.pts);
+    players.forEach((p, i) => { p.rank = i + 1; });
+    return players;
+  } catch (e) {
+    console.error('Client fallback failed for players:', e);
+    return [];
+  }
+}
+
+// ===== RENDER TEAMS VIEW =====
+function renderTeamsView() {
+  const podiumEl = document.getElementById('pr-teams-podium');
+  const tableWrap = document.getElementById('pr-teams-table-wrap');
+  const sortLabel = document.getElementById('pr-team-sort-label');
+  const countBadge = document.getElementById('pr-team-count-badge');
+
+  if (!prState.teamsData || prState.teamsData.length === 0) {
+    if (tableWrap) tableWrap.innerHTML = '<div class="no-games">No team data available right now.</div>';
+    return;
+  }
+
+  // 1. Filter
+  let list = [...prState.teamsData];
+  if (prState.teamsFilter.conf !== 'all') {
+    const isEast = prState.teamsFilter.conf === 'east';
+    list = list.filter(t => isEast ? t.conference === 'Eastern' : t.conference === 'Western');
+  }
+  if (prState.teamsFilter.search) {
+    const q = prState.teamsFilter.search;
+    list = list.filter(t =>
+      (t.name || '').toLowerCase().includes(q) ||
+      (t.fullName || '').toLowerCase().includes(q) ||
+      (t.abbreviation || '').toLowerCase().includes(q)
+    );
+  }
+
+  // 2. Sort
+  const key = prState.teamsSort.key;
+  const isAsc = prState.teamsSort.dir === 'asc';
+
+  list.sort((a, b) => {
+    let valA = a[key] !== undefined ? a[key] : (a.stats?.[key] ?? 0);
+    let valB = b[key] !== undefined ? b[key] : (b.stats?.[key] ?? 0);
+
+    if (typeof valA === 'string') {
+      return isAsc ? valA.localeCompare(valB) : valB.localeCompare(valA);
+    }
+    return isAsc ? (valA - valB) : (valB - valA);
+  });
+
+  // Update header text
+  const labelText = TEAM_STAT_LABELS[key] || key.toUpperCase();
+  if (sortLabel) {
+    sortLabel.innerHTML = `Ranked by: <strong>${labelText}</strong> ${isAsc ? '▲ (Ascending)' : '▼ (Descending)'}`;
+  }
+  if (countBadge) {
+    countBadge.textContent = `${list.length} Team${list.length === 1 ? '' : 's'}`;
+  }
+
+  // 3. Render Top 3 Spotlight Podium
+  if (podiumEl) {
+    const top3 = list.slice(0, 3);
+    if (top3.length === 0) {
+      podiumEl.innerHTML = '';
+    } else {
+      podiumEl.innerHTML = renderTeamsPodium(top3, key, labelText);
+    }
+  }
+
+  // 4. Render Interactive Full Table
+  if (tableWrap) {
+    tableWrap.innerHTML = renderTeamsTable(list, key, isAsc);
+  }
+}
+
+function renderTeamsPodium(top3, sortKey, labelText) {
+  return top3.map((team, idx) => {
+    const rankNum = idx + 1;
+    const rankClass = `rank-${rankNum}`;
+    const medalText = rankNum === 1 ? '👑 #1' : `#${rankNum}`;
+
+    let mainStatVal = team[sortKey] !== undefined ? team[sortKey] : 0;
+    if (sortKey === 'winPct') mainStatVal = (mainStatVal * 100).toFixed(1) + '%';
+    else if (sortKey === 'diff') mainStatVal = (mainStatVal > 0 ? '+' : '') + mainStatVal;
+    else if (sortKey === 'fgPct' || sortKey === 'threePct' || sortKey === 'ftPct') mainStatVal = mainStatVal + '%';
+
+    return `
+      <div class="pr-podium-card ${rankClass}">
+        <div class="pr-podium-badge-row">
+          <span class="pr-rank-medal">${medalText}</span>
+          <span class="pr-podium-subtag">${team.conference}</span>
+        </div>
+        <div class="pr-team-podium-body">
+          <img src="${team.logo}" alt="${team.name}" class="pr-team-podium-logo" onerror="this.src='https://a.espn.com/i/teamlogos/nba/500/nba.png'" />
+          <div class="pr-team-podium-info">
+            <div class="pr-team-podium-name">${team.fullName}</div>
+            <div class="pr-team-podium-meta">
+              <span class="pr-conf-tag">${team.abbreviation}</span>
+              <span>${team.wins}-${team.losses} (${team.winPct > 0 ? (team.winPct * 100).toFixed(0) : '0'}%)</span>
+              <span>• Streak ${team.streak}</span>
+            </div>
+          </div>
+        </div>
+        <div class="pr-podium-stat-box">
+          <div class="pr-stat-focus-row">
+            <span class="pr-stat-focus-label">${labelText}</span>
+            <span class="pr-stat-focus-value">${mainStatVal}</span>
+          </div>
+          <div class="pr-podium-mini-stats">
+            <div class="pr-mini-stat">
+              <span class="pr-mini-stat-label">PPG</span>
+              <span class="pr-mini-stat-value">${team.ppg || '—'}</span>
+            </div>
+            <div class="pr-mini-stat">
+              <span class="pr-mini-stat-label">RPG</span>
+              <span class="pr-mini-stat-value">${team.rpg || '—'}</span>
+            </div>
+            <div class="pr-mini-stat">
+              <span class="pr-mini-stat-label">APG</span>
+              <span class="pr-mini-stat-value">${team.apg || '—'}</span>
+            </div>
+            <div class="pr-mini-stat">
+              <span class="pr-mini-stat-label">DIFF</span>
+              <span class="pr-mini-stat-value ${team.diff > 0 ? 'val-positive' : team.diff < 0 ? 'val-negative' : ''}">
+                ${team.diff > 0 ? '+' : ''}${team.diff}
+              </span>
+            </div>
+          </div>
+        </div>
+      </div>
+    `;
+  }).join('');
+}
+
+function renderTeamsTable(list, sortKey, isAsc) {
+  const getSortIcon = (k) => {
+    if (sortKey !== k) return '<span class="pr-sort-icon">⇅</span>';
+    return isAsc ? '<span class="pr-sort-icon">▲</span>' : '<span class="pr-sort-icon">▼</span>';
+  };
+
+  const getThClass = (k, align = '') => {
+    const active = sortKey === k ? 'active-sort' : '';
+    const alignClass = align ? `th-${align}` : '';
+    return `class="${alignClass} ${active}"`.trim();
+  };
+
+  const rows = list.map((t, idx) => {
+    const rankNum = idx + 1;
+    const rankBadgeClass = rankNum === 1 ? 'rank-top1' : rankNum === 2 ? 'rank-top2' : rankNum === 3 ? 'rank-top3' : '';
+    const diffDisplay = (t.diff > 0 ? '+' : '') + t.diff;
+    const diffClass = t.diff > 0 ? 'val-positive' : t.diff < 0 ? 'val-negative' : '';
+
+    return `
+      <tr>
+        <td class="td-center">
+          <span class="pr-table-rank ${rankBadgeClass}">#${rankNum}</span>
+        </td>
+        <td class="td-left">
+          <div class="pr-team-cell">
+            <img src="${t.logo}" alt="${t.name}" class="pr-team-cell-logo" onerror="this.src='https://a.espn.com/i/teamlogos/nba/500/nba.png'" />
+            <span class="pr-team-cell-name">${t.name}</span>
+            <span class="pr-team-cell-abbr">(${t.abbreviation})</span>
+            <span class="pr-conf-tag" style="margin-left: 4px;">${t.conference === 'Eastern' ? 'EAST' : 'WEST'}</span>
+          </div>
+        </td>
+        <td class="td-center ${sortKey === 'powerScore' ? 'sorted-cell' : ''}">
+          <strong class="val-highlight">${t.powerScore ?? '—'}</strong>
+        </td>
+        <td class="td-center ${sortKey === 'wins' || sortKey === 'losses' ? 'sorted-cell' : ''}">
+          ${t.wins}-${t.losses}
+        </td>
+        <td class="${sortKey === 'winPct' ? 'sorted-cell' : ''}">
+          ${(t.winPct * 100).toFixed(1)}%
+        </td>
+        <td class="${sortKey === 'ppg' ? 'sorted-cell' : ''}">
+          <strong>${t.ppg}</strong>
+        </td>
+        <td class="${sortKey === 'oppPpg' ? 'sorted-cell' : ''}">
+          ${t.oppPpg}
+        </td>
+        <td class="${sortKey === 'diff' ? 'sorted-cell' : ''}">
+          <span class="${diffClass}">${diffDisplay}</span>
+        </td>
+        <td class="${sortKey === 'rpg' ? 'sorted-cell' : ''}">
+          ${t.rpg || '—'}
+        </td>
+        <td class="${sortKey === 'apg' ? 'sorted-cell' : ''}">
+          ${t.apg || '—'}
+        </td>
+        <td class="${sortKey === 'spg' ? 'sorted-cell' : ''}">
+          ${t.spg || '—'}
+        </td>
+        <td class="${sortKey === 'bpg' ? 'sorted-cell' : ''}">
+          ${t.bpg || '—'}
+        </td>
+        <td class="${sortKey === 'fgPct' ? 'sorted-cell' : ''}">
+          ${t.fgPct ? t.fgPct + '%' : '—'}
+        </td>
+        <td class="${sortKey === 'threePct' ? 'sorted-cell' : ''}">
+          ${t.threePct ? t.threePct + '%' : '—'}
+        </td>
+        <td class="${sortKey === 'ftPct' ? 'sorted-cell' : ''}">
+          ${t.ftPct ? t.ftPct + '%' : '—'}
+        </td>
+        <td class="td-center ${sortKey === 'streak' ? 'sorted-cell' : ''}">
+          ${t.streak}
+        </td>
+      </tr>
+    `;
+  }).join('');
+
+  return `
+    <table class="pr-table">
+      <thead>
+        <tr>
+          <th ${getThClass('rank', 'center')} data-sort="rank">#</th>
+          <th ${getThClass('name', 'left')} data-sort="name">Team ${getSortIcon('name')}</th>
+          <th ${getThClass('powerScore', 'center')} data-sort="powerScore" title="Composite Power Rating">Power ${getSortIcon('powerScore')}</th>
+          <th ${getThClass('wins', 'center')} data-sort="wins">W-L ${getSortIcon('wins')}</th>
+          <th ${getThClass('winPct')} data-sort="winPct">Win % ${getSortIcon('winPct')}</th>
+          <th ${getThClass('ppg')} data-sort="ppg">PPG ${getSortIcon('ppg')}</th>
+          <th ${getThClass('oppPpg')} data-sort="oppPpg">OPP PPG ${getSortIcon('oppPpg')}</th>
+          <th ${getThClass('diff')} data-sort="diff">DIFF ${getSortIcon('diff')}</th>
+          <th ${getThClass('rpg')} data-sort="rpg">RPG ${getSortIcon('rpg')}</th>
+          <th ${getThClass('apg')} data-sort="apg">APG ${getSortIcon('apg')}</th>
+          <th ${getThClass('spg')} data-sort="spg">SPG ${getSortIcon('spg')}</th>
+          <th ${getThClass('bpg')} data-sort="bpg">BPG ${getSortIcon('bpg')}</th>
+          <th ${getThClass('fgPct')} data-sort="fgPct">FG% ${getSortIcon('fgPct')}</th>
+          <th ${getThClass('threePct')} data-sort="threePct">3P% ${getSortIcon('threePct')}</th>
+          <th ${getThClass('ftPct')} data-sort="ftPct">FT% ${getSortIcon('ftPct')}</th>
+          <th ${getThClass('streak', 'center')} data-sort="streak">Strk ${getSortIcon('streak')}</th>
+        </tr>
+      </thead>
+      <tbody>
+        ${rows}
+      </tbody>
+    </table>
+  `;
+}
+
+// ===== RENDER PLAYERS VIEW =====
+function renderPlayersView() {
+  const podiumEl = document.getElementById('pr-players-podium');
+  const tableWrap = document.getElementById('pr-players-table-wrap');
+  const sortLabel = document.getElementById('pr-player-sort-label');
+  const countBadge = document.getElementById('pr-player-count-badge');
+
+  if (!prState.playersData || prState.playersData.length === 0) {
+    if (tableWrap) tableWrap.innerHTML = '<div class="no-games">No player statistics available right now.</div>';
+    return;
+  }
+
+  // 1. Filter
+  let list = [...prState.playersData];
+  if (prState.playersFilter.search) {
+    const q = prState.playersFilter.search;
+    list = list.filter(p =>
+      (p.name || '').toLowerCase().includes(q) ||
+      (p.shortName || '').toLowerCase().includes(q) ||
+      (p.team?.name || '').toLowerCase().includes(q) ||
+      (p.team?.abbreviation || '').toLowerCase().includes(q)
+    );
+  }
+
+  // 2. Sort
+  const key = prState.playersSort.key;
+  const isAsc = prState.playersSort.dir === 'asc';
+
+  list.sort((a, b) => {
+    let valA = a.stats?.[key] !== undefined ? a.stats[key] : (a[key] ?? 0);
+    let valB = b.stats?.[key] !== undefined ? b.stats[key] : (b[key] ?? 0);
+
+    if (typeof valA === 'string') {
+      return isAsc ? valA.localeCompare(valB) : valB.localeCompare(valA);
+    }
+    return isAsc ? (valA - valB) : (valB - valA);
+  });
+
+  // Update header text
+  const labelText = PLAYER_STAT_LABELS[key] || key.toUpperCase();
+  if (sortLabel) {
+    sortLabel.innerHTML = `Ranked by: <strong>${labelText}</strong> ${isAsc ? '▲ (Ascending)' : '▼ (Descending)'}`;
+  }
+  if (countBadge) {
+    countBadge.textContent = `${list.length} Player${list.length === 1 ? '' : 's'}`;
+  }
+
+  // 3. Render Top 3 Spotlight Podium
+  if (podiumEl) {
+    const top3 = list.slice(0, 3);
+    if (top3.length === 0) {
+      podiumEl.innerHTML = '';
+    } else {
+      podiumEl.innerHTML = renderPlayersPodium(top3, key, labelText);
+    }
+  }
+
+  // 4. Render Interactive Full Table
+  if (tableWrap) {
+    tableWrap.innerHTML = renderPlayersTable(list, key, isAsc);
+  }
+}
+
+function renderPlayersPodium(top3, sortKey, labelText) {
+  return top3.map((player, idx) => {
+    const rankNum = idx + 1;
+    const rankClass = `rank-${rankNum}`;
+    const medalText = rankNum === 1 ? '👑 #1' : `#${rankNum}`;
+
+    let mainStatVal = player.stats?.[sortKey] !== undefined ? player.stats[sortKey] : 0;
+    if (sortKey === 'fgPct' || sortKey === 'threePct' || sortKey === 'ftPct') mainStatVal = mainStatVal + '%';
+
+    return `
+      <div class="pr-podium-card ${rankClass}">
+        <div class="pr-podium-badge-row">
+          <span class="pr-rank-medal">${medalText}</span>
+          <span class="pr-podium-subtag">${player.team?.abbreviation || 'NBA'}</span>
+        </div>
+        <div class="pr-player-podium-body">
+          <div class="pr-player-avatar-wrap">
+            <img src="${player.headshot}" alt="${player.name}" class="pr-player-podium-headshot" onerror="this.src='https://a.espncdn.com/combiner/i?img=/i/headshots/nophone.png&w=350&h=254'" />
+            ${player.team?.logo ? `<img src="${player.team.logo}" alt="${player.team.abbreviation}" class="pr-player-podium-team-badge" onerror="this.style.display='none'" />` : ''}
+          </div>
+          <div class="pr-player-podium-info">
+            <div class="pr-player-podium-name">${player.name}</div>
+            <div class="pr-player-podium-meta">
+              <span class="pr-pos-chip">${player.position}</span>
+              <span>${player.team?.name || ''}</span>
+              ${player.jersey ? `<span>${player.jersey}</span>` : ''}
+            </div>
+          </div>
+        </div>
+        <div class="pr-podium-stat-box">
+          <div class="pr-stat-focus-row">
+            <span class="pr-stat-focus-label">${labelText}</span>
+            <span class="pr-stat-focus-value">${mainStatVal}</span>
+          </div>
+          <div class="pr-podium-mini-stats">
+            <div class="pr-mini-stat">
+              <span class="pr-mini-stat-label">PPG</span>
+              <span class="pr-mini-stat-value">${player.stats.pts}</span>
+            </div>
+            <div class="pr-mini-stat">
+              <span class="pr-mini-stat-label">RPG</span>
+              <span class="pr-mini-stat-value">${player.stats.reb}</span>
+            </div>
+            <div class="pr-mini-stat">
+              <span class="pr-mini-stat-label">APG</span>
+              <span class="pr-mini-stat-value">${player.stats.ast}</span>
+            </div>
+            <div class="pr-mini-stat">
+              <span class="pr-mini-stat-label">FG%</span>
+              <span class="pr-mini-stat-value">${player.stats.fgPct ? player.stats.fgPct + '%' : '—'}</span>
+            </div>
+          </div>
+        </div>
+      </div>
+    `;
+  }).join('');
+}
+
+function renderPlayersTable(list, sortKey, isAsc) {
+  const getSortIcon = (k) => {
+    if (sortKey !== k) return '<span class="pr-sort-icon">⇅</span>';
+    return isAsc ? '<span class="pr-sort-icon">▲</span>' : '<span class="pr-sort-icon">▼</span>';
+  };
+
+  const getThClass = (k, align = '') => {
+    const active = sortKey === k ? 'active-sort' : '';
+    const alignClass = align ? `th-${align}` : '';
+    return `class="${alignClass} ${active}"`.trim();
+  };
+
+  const rows = list.map((p, idx) => {
+    const rankNum = idx + 1;
+    const rankBadgeClass = rankNum === 1 ? 'rank-top1' : rankNum === 2 ? 'rank-top2' : rankNum === 3 ? 'rank-top3' : '';
+
+    return `
+      <tr>
+        <td class="td-center">
+          <span class="pr-table-rank ${rankBadgeClass}">#${rankNum}</span>
+        </td>
+        <td class="td-left">
+          <div class="pr-player-cell">
+            <img src="${p.headshot}" alt="${p.name}" class="pr-player-cell-headshot" onerror="this.src='https://a.espncdn.com/combiner/i?img=/i/headshots/nophone.png&w=350&h=254'" />
+            <div class="pr-player-cell-info">
+              <span class="pr-player-cell-name">${p.name}</span>
+              <span class="pr-player-cell-meta">${p.position} ${p.jersey ? '• ' + p.jersey : ''}</span>
+            </div>
+          </div>
+        </td>
+        <td class="td-left">
+          <div class="pr-team-cell">
+            ${p.team?.logo ? `<img src="${p.team.logo}" alt="${p.team.abbreviation}" class="pr-team-cell-logo" onerror="this.style.display='none'" />` : ''}
+            <span class="pr-team-cell-abbr">${p.team?.abbreviation || 'NBA'}</span>
+          </div>
+        </td>
+        <td class="${sortKey === 'pts' ? 'sorted-cell' : ''}">
+          <strong class="val-highlight">${p.stats.pts}</strong>
+        </td>
+        <td class="${sortKey === 'reb' ? 'sorted-cell' : ''}">
+          ${p.stats.reb}
+        </td>
+        <td class="${sortKey === 'ast' ? 'sorted-cell' : ''}">
+          ${p.stats.ast}
+        </td>
+        <td class="${sortKey === 'stl' ? 'sorted-cell' : ''}">
+          ${p.stats.stl}
+        </td>
+        <td class="${sortKey === 'blk' ? 'sorted-cell' : ''}">
+          ${p.stats.blk}
+        </td>
+        <td class="${sortKey === 'threePM' ? 'sorted-cell' : ''}">
+          ${p.stats.threePM}
+        </td>
+        <td class="${sortKey === 'fgPct' ? 'sorted-cell' : ''}">
+          ${p.stats.fgPct ? p.stats.fgPct + '%' : '—'}
+        </td>
+        <td class="${sortKey === 'threePct' ? 'sorted-cell' : ''}">
+          ${p.stats.threePct ? p.stats.threePct + '%' : '—'}
+        </td>
+        <td class="${sortKey === 'ftPct' ? 'sorted-cell' : ''}">
+          ${p.stats.ftPct ? p.stats.ftPct + '%' : '—'}
+        </td>
+        <td class="${sortKey === 'min' ? 'sorted-cell' : ''}">
+          ${p.stats.min}
+        </td>
+        <td class="td-center ${sortKey === 'gp' ? 'sorted-cell' : ''}">
+          ${p.stats.gp}
+        </td>
+      </tr>
+    `;
+  }).join('');
+
+  return `
+    <table class="pr-table">
+      <thead>
+        <tr>
+          <th ${getThClass('rank', 'center')} data-sort="rank">#</th>
+          <th ${getThClass('name', 'left')} data-sort="name">Player ${getSortIcon('name')}</th>
+          <th ${getThClass('team', 'left')} data-sort="team">Team ${getSortIcon('team')}</th>
+          <th ${getThClass('pts')} data-sort="pts">PTS ${getSortIcon('pts')}</th>
+          <th ${getThClass('reb')} data-sort="reb">REB ${getSortIcon('reb')}</th>
+          <th ${getThClass('ast')} data-sort="ast">AST ${getSortIcon('ast')}</th>
+          <th ${getThClass('stl')} data-sort="stl">STL ${getSortIcon('stl')}</th>
+          <th ${getThClass('blk')} data-sort="blk">BLK ${getSortIcon('blk')}</th>
+          <th ${getThClass('threePM')} data-sort="threePM">3PM ${getSortIcon('threePM')}</th>
+          <th ${getThClass('fgPct')} data-sort="fgPct">FG% ${getSortIcon('fgPct')}</th>
+          <th ${getThClass('threePct')} data-sort="threePct">3P% ${getSortIcon('threePct')}</th>
+          <th ${getThClass('ftPct')} data-sort="ftPct">FT% ${getSortIcon('ftPct')}</th>
+          <th ${getThClass('min')} data-sort="min">MIN ${getSortIcon('min')}</th>
+          <th ${getThClass('gp', 'center')} data-sort="gp">GP ${getSortIcon('gp')}</th>
+        </tr>
+      </thead>
+      <tbody>
+        ${rows}
+      </tbody>
+    </table>
+  `;
+}
+
 
 // ===== GAME DETAIL MODAL =====
 
@@ -1593,7 +2604,8 @@ function initLiveTv() {
 
 document.addEventListener('DOMContentLoaded', () => {
   initTabs();
-  initConferenceToggle();
+  initGamesControls();
+  initStandingsControls();
   initGameDetailListeners();
   initLiveTv();
   loadGames().then(startCountdown);

@@ -27,15 +27,35 @@ A real-time NBA scoreboard application designed for desktop and Smart TV browser
     - Bypasses mixed-content restrictions when the web app is served over HTTPS (e.g., Render) while accessing HTTP streams.
 - **Channels Catalog (`/api/iptv/channels`):**
     - Returns metadata for NBA TV channels and backup streams.
+- **Power Rankings & League Leaders APIs:**
+    - `/api/power-rankings/teams`: Aggregates team standings and in-depth performance statistics (PPG, RPG, APG, DIFF, FG%, 3PT%, FT%, SPG, BPG, Power Index) with in-memory 3-minute TTL caching.
+    - `/api/power-rankings/players`: Fetches and parses top individual player statistics (PTS, REB, AST, STL, BLK, 3PM, FG%, 3PT%, FT%, MPG, GP) with in-memory 3-minute TTL caching.
 - **Network Accessibility:** Configured to listen on `0.0.0.0` to allow local network access (e.g., from a Smart TV).
 
 ### Frontend (`app.js`)
 - **Data Fetching:** Periodically fetches scoreboard data every 30 seconds.
 - **Normalizing Timezones:** Contains logic to handle NBA game times (US Eastern) and display them appropriately for the user (includes specific offsets for Philippine Time).
 - **Dynamic Rendering:**
-    - **Game Cards:** Displays team logos, scores, game status (Live, Final, Scheduled), and custom backgrounds based on team colors.
-    - **Game Detail Modal:** Fetches deeper game summaries (box scores, player stats, quarter scores) when a card is clicked.
-    - **Standings:** Fetches and sorts NBA conference standings.
+    - **Game Cards & Controls:** 
+        - Broadcast-style card headers with official network tags (`📺 ESPN`, `📺 NBA League Pass`), tournament/season notes, and glowing live badges.
+        - High-contrast matchup arena featuring official team logos, abbreviations, full team names, record badges `(W-L)`, bold tabular scores, and winner chevron indicators.
+        - Detailed quarter-by-quarter linescore strips (`Q1`–`Q4`, `OT`) for finished and live games.
+        - Dedicated card footer with `📊 Box Score & Details` modal trigger alongside smart action buttons (`▶ Highlights`, `🔴 Watch Live`, `📅 Preview`).
+        - Integrated Games Controls bar: 4 quick status filter pills (`🏀 All Games`, `Live Now`, `✅ Finished`, `⏰ Upcoming`), real-time team search filter, manual refresh button with spinning indicator, and smooth section jump buttons (`Today's Results`, `Tomorrow's Schedule`).
+    - **Game Detail Modal:** Fetches deeper game summaries (box scores, player stats, quarter scores, and team head-to-head comparison) when any card or Box Score button is clicked.
+    - **Standings Tab:**
+        - Official conference switcher (`Eastern Conference` vs `Western Conference`) with persistent active state.
+        - **#1 Seed Spotlight Banner:** Prominent hero card spotlighting the conference leader with high-res logo, gold crown `#1 SEED` badge, full record, win%, differential, home/away splits, and current streak.
+        - **Rich 12-Column Table:** Complete conference picture displaying `#`, `TEAM`, `W`, `L`, `PCT`, `GB`, `DIFF`, `HOME`, `AWAY`, `CONF`, `L10`, and `STRK`.
+        - **Visual Playoff Picture:** Color-coded rank badges (Gold `#1`, Green Playoff `1–6`, Orange Play-In `7–10`, Slate Lottery `11–15`) and interactive playoff cutoff divider rows (`🏆 Top 6 Guaranteed Playoff Line` and `⚔️ Seeds 7–10 Play-In Tournament Line`).
+        - **Interactive Sorting & Search:** Real-time search filter and clickable column headers with ascending/descending toggles and active highlight column styling.
+    - **Power Rankings & League Leaders:**
+        - Replaces the playoff section during the early/regular season.
+        - **Sub-Tabs:** Dedicated views for **Team Rankings** and **Player Leaders**.
+        - **Top 3 Spotlight Podium:** Visual top-3 spotlight cards with rank medals (#1 Gold with crown, #2 Silver, #3 Bronze), player avatars / team logos, and prominent stat counters for the active category.
+        - **Multi-Category Sorting:** Quick-filter pill buttons and interactive, clickable table headers with ascending/descending toggles and visual indicators (`▲`/`▼`) for any category (PPG, RPG, APG, DIFF, FG%, 3PT%, SPG, BPG, etc.).
+        - **Real-Time Filtering:** Real-time search by player or team name, plus Eastern/Western conference filter.
+        - **Resilient Fallback:** Automatically falls back directly to ESPN public APIs if the local server endpoints are unavailable.
 - **Live TV (IPTV Streaming):**
     - Integrated "Watch NBA TV" button on the far right of the navigation bar with animated live pulse indicator.
     - Full HLS video player powered by `hls.js` with fallback to native video playback on Safari and Smart TVs.
