@@ -6,6 +6,8 @@
   <title>NBA Live Scoreboard</title>
   <link rel="stylesheet" href="style.css" />
   <link rel="icon" href="https://cdn.nba.com/manage/2024/03/cropped-favicon-512x512-1-32x32.png" />
+  <!-- HLS Video Streaming Support (Hls.js) -->
+  <script src="https://cdn.jsdelivr.net/npm/hls.js@1.5.8/dist/hls.min.js"></script>
 </head>
 <body>
   <!-- Header -->
@@ -17,9 +19,17 @@
 
   <!-- Tab Bar -->
   <nav class="tab-bar">
-    <button class="tab active" data-tab="games">GAMES</button>
-    <button class="tab" data-tab="standings">STANDINGS</button>
-    <button class="tab" data-tab="playoffs">PLAYOFFS</button>
+    <div class="tab-group">
+      <button class="tab active" data-tab="games">GAMES</button>
+      <button class="tab" data-tab="standings">STANDINGS</button>
+      <button class="tab" data-tab="playoffs">PLAYOFFS</button>
+    </div>
+    <div class="tab-bar-right">
+      <button class="tab live-tv-tab-btn" data-tab="livetv" id="watch-nba-tv-btn" title="Watch Live NBA TV Philippines">
+        <span class="live-dot-pulse"></span>
+        Watch NBA TV
+      </button>
+    </div>
   </nav>
 
   <!-- Main Content -->
@@ -59,6 +69,128 @@
 
     <!-- Playoffs Tab -->
     <section id="playoffs-tab" class="tab-content"></section>
+
+    <!-- Live TV Tab (NBA TV Philippines) -->
+    <section id="livetv-tab" class="tab-content">
+      <div class="livetv-container">
+        <!-- Live TV Header / Controls Bar -->
+        <div class="livetv-header">
+          <div class="livetv-title-area">
+            <div class="livetv-badge-row">
+              <span class="livetv-live-tag"><span class="live-indicator-dot"></span> LIVE 24/7</span>
+              <span class="livetv-quality-tag">HD 1080p 60FPS</span>
+              <span class="livetv-format-tag">HLS / M3U</span>
+            </div>
+            <h2 class="livetv-channel-name" id="current-channel-name">NBA TV Philippines</h2>
+            <p class="livetv-tagline">24/7 Live NBA Basketball coverage, live games, studio analysis, and highlights</p>
+          </div>
+
+          <div class="livetv-channel-actions">
+            <div class="channel-selector-wrapper">
+              <label for="channel-select" class="channel-label">Stream Source / Server:</label>
+              <select id="channel-select" class="channel-select">
+                <option value="primary">NBA TV Philippines (Primary - 1080p)</option>
+                <option value="backup">NBA TV Server 2 (Backup HD)</option>
+                <option value="custom">Custom M3U8 Stream URL...</option>
+              </select>
+            </div>
+            <div class="channel-action-btns">
+              <button id="livetv-refresh-btn" class="tv-btn tv-btn-secondary" title="Reload live stream">
+                <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="M21.5 2v6h-6M2.5 22v-6h6M2 11.5a10 10 0 0 1 18.8-4.3M22 12.5a10 10 0 0 1-18.8 4.2"/></svg>
+                <span>Reload</span>
+              </button>
+              <button id="custom-stream-btn" class="tv-btn tv-btn-outline" title="Configure custom stream URL">
+                <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1 0 2.83 2 2 0 0 1-2.83 0l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-2 2 2 2 0 0 1-2-2v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83 0 2 2 0 0 1 0-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1-2-2 2 2 0 0 1 2-2h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 0-2.83 2 2 0 0 1 2.83 0l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 2-2 2 2 0 0 1 2 2v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 0 2 2 0 0 1 0 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 2 2 2 2 0 0 1-2 2h-.09a1.65 1.65 0 0 0-1.51 1z"/></svg>
+                <span>Custom URL</span>
+              </button>
+            </div>
+          </div>
+        </div>
+
+        <!-- Video Player Box -->
+        <div class="livetv-player-wrapper" id="livetv-player-wrapper">
+          <div class="video-container" id="video-container">
+            <video id="livetv-video" class="livetv-video" playsinline controls preload="auto"></video>
+            
+            <!-- Video Overlay / Buffering / Error State -->
+            <div id="livetv-overlay" class="livetv-overlay hidden">
+              <div class="overlay-spinner"></div>
+              <p id="overlay-message" class="overlay-message">Connecting to NBA TV Philippines live feed...</p>
+              <button id="overlay-retry-btn" class="tv-btn tv-btn-primary hidden">Retry Connection</button>
+            </div>
+          </div>
+
+          <!-- Video Control Bar -->
+          <div class="livetv-quick-bar">
+            <div class="quick-bar-left">
+              <span class="stream-status-pill online" id="stream-status-pill">
+                <span class="status-dot"></span>
+                <span id="stream-status-text">Connected</span>
+              </span>
+              <span class="stream-info-pill" id="stream-resolution-text">1080p 60fps</span>
+            </div>
+            <div class="quick-bar-right">
+              <button id="theater-mode-btn" class="quick-btn" title="Toggle Theater Mode">
+                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="2" y="4" width="20" height="16" rx="2"/><path d="M2 8h20"/></svg>
+                <span>Theater Mode</span>
+              </button>
+              <button id="fullscreen-btn" class="quick-btn" title="Full Screen (TV Friendly)">
+                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M8 3H5a2 2 0 0 0-2 2v3m18 0V5a2 2 0 0 0-2-2h-3m0 18h3a2 2 0 0 0 2-2v-3M3 16v3a2 2 0 0 0 2 2h3"/></svg>
+                <span>Fullscreen</span>
+              </button>
+            </div>
+          </div>
+        </div>
+
+        <!-- Custom M3U / Stream Settings Modal -->
+        <div id="custom-stream-modal" class="custom-stream-modal hidden">
+          <div class="custom-stream-backdrop"></div>
+          <div class="custom-stream-content">
+            <div class="custom-stream-header">
+              <h3>Custom IPTV / M3U Stream Source</h3>
+              <button id="close-custom-modal" class="close-custom-btn">&times;</button>
+            </div>
+            <p class="custom-stream-desc">
+              Have your own IPTV link, tokenized Cignal stream, or .m3u8 playlist? Enter the stream URL below to play it directly in the player:
+            </p>
+            <div class="custom-input-group">
+              <input type="text" id="custom-stream-input" placeholder="https://example.com/stream.m3u8" />
+              <button id="apply-custom-stream" class="tv-btn tv-btn-primary">Apply & Play</button>
+            </div>
+            <div class="custom-presets">
+              <span class="preset-label">Quick Presets:</span>
+              <button class="preset-btn" data-url="http://23.237.104.106:8080/USA_NBA/index.m3u8">NBA TV Feed 1 (1080p)</button>
+              <button class="preset-btn" data-url="http://23.237.104.106:8080/USA_NBA/tracks-v1a1/mono.m3u8">NBA TV Direct Track</button>
+              <button id="reset-stream-btn" class="preset-btn reset-preset-btn">Reset to Default</button>
+            </div>
+          </div>
+        </div>
+
+        <!-- IPTV Information & Direct M3U Links Card -->
+        <div class="livetv-info-card">
+          <div class="info-card-section">
+            <div class="info-card-header">
+              <div class="info-icon">📺</div>
+              <div>
+                <h4>External IPTV & Smart TV Setup</h4>
+                <p>Stream NBA TV Philippines on your Smart TV (TiviMate, Smart IPTV, OTT Navigator, Kodi, or VLC)</p>
+              </div>
+            </div>
+            <div class="m3u-download-row">
+              <div class="m3u-link-box">
+                <span class="m3u-label">M3U Playlist URL:</span>
+                <input type="text" id="m3u-playlist-url" class="m3u-input" readonly value="" />
+                <button id="copy-m3u-btn" class="tv-btn tv-btn-secondary">Copy Link</button>
+              </div>
+              <a href="/nbatv.m3u" download="nbatv.m3u" class="tv-btn tv-btn-secondary download-btn">
+                <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>
+                <span>Download .m3u</span>
+              </a>
+            </div>
+          </div>
+        </div>
+      </div>
+    </section>
 
     <!-- Stats Tab (placeholder) -->
     <section id="stats-tab" class="tab-content">

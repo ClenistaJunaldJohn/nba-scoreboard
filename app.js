@@ -549,13 +549,23 @@ function initTabs() {
       // Activate selected
       tab.classList.add('active');
       const target = tab.getAttribute('data-tab');
-      document.getElementById(`${target}-tab`).classList.add('active');
+      const targetContent = document.getElementById(`${target}-tab`);
+      if (targetContent) {
+        targetContent.classList.add('active');
+      }
 
       // Load data for tab if needed
       if (target === 'standings') {
         loadStandings('east');
       } else if (target === 'playoffs') {
         loadPlayoffs();
+      } else if (target === 'livetv') {
+        startLiveTV();
+      }
+
+      // Pause live stream if navigating away from Live TV tab
+      if (target !== 'livetv') {
+        pauseLiveTV();
       }
     });
   });
@@ -1237,11 +1247,354 @@ function initGameDetailListeners() {
   });
 }
 
+// ===== LIVE TV (IPTV / M3U) STREAM CONTROLLER =====
+
+let liveTvHls = null;
+let currentStreamSource = 'primary'; // 'primary', 'backup', 'custom'
+
+const LIVE_CHANNELS = {
+  primary: {
+    name: 'NBA TV Philippines',
+    url: 'http://23.237.104.106:8080/USA_NBA/index.m3u8',
+    quality: '1080p 60FPS'
+  },
+  backup: {
+    name: 'NBA TV Server 2',
+    url: 'http://23.237.104.106:8080/USA_NBA/tracks-v1a1/mono.m3u8',
+    quality: '1080p Direct Track'
+  }
+};
+
+function getEffectiveStreamUrl(rawUrl) {
+  // If running on HTTPS (e.g. Render production) or stream needs proxying to bypass CORS & mixed-content
+  const isHttps = window.location.protocol === 'https:';
+  const isHttpStream = rawUrl.startsWith('http://');
+  if (isHttps || isHttpStream) {
+    return `/api/iptv-proxy?url=${encodeURIComponent(rawUrl)}`;
+  }
+  return rawUrl;
+}
+
+function updateStreamStatus(status, text) {
+  const pill = document.getElementById('stream-status-pill');
+  const textEl = document.getElementById('stream-status-text');
+  if (!pill || !textEl) return;
+
+  pill.className = `stream-status-pill ${status}`;
+  textEl.textContent = text;
+}
+
+function showOverlay(message, showRetry = false) {
+  const overlay = document.getElementById('livetv-overlay');
+  const msgEl = document.getElementById('overlay-message');
+  const retryBtn = document.getElementById('overlay-retry-btn');
+  const spinner = overlay ? overlay.querySelector('.overlay-spinner') : null;
+
+  if (overlay && msgEl) {
+    overlay.classList.remove('hidden');
+    msgEl.textContent = message;
+    if (retryBtn) {
+      if (showRetry) {
+        retryBtn.classList.remove('hidden');
+        if (spinner) spinner.style.display = 'none';
+      } else {
+        retryBtn.classList.add('hidden');
+        if (spinner) spinner.style.display = 'block';
+      }
+    }
+  }
+}
+
+function hideOverlay() {
+  const overlay = document.getElementById('livetv-overlay');
+  if (overlay) overlay.classList.add('hidden');
+}
+
+function loadLiveTvStream(sourceKey = null) {
+  if (sourceKey) currentStreamSource = sourceKey;
+  const video = document.getElementById('livetv-video');
+  if (!video) return;
+
+  let streamUrl = '';
+  let channelName = 'NBA TV Philippines';
+  let qualityText = '1080p 60FPS';
+
+  if (currentStreamSource === 'custom') {
+    const savedCustom = localStorage.getItem('nba_custom_stream_url') || '';
+    if (!savedCustom) {
+      openCustomStreamModal();
+      return;
+    }
+    streamUrl = savedCustom;
+    channelName = 'Custom Stream';
+    qualityText = 'Custom HLS / M3U';
+  } else if (LIVE_CHANNELS[currentStreamSource]) {
+    const chan = LIVE_CHANNELS[currentStreamSource];
+    streamUrl = chan.url;
+    channelName = chan.name;
+    qualityText = chan.quality;
+  } else {
+    streamUrl = LIVE_CHANNELS.primary.url;
+  }
+
+  // Update channel name in UI
+  const nameEl = document.getElementById('current-channel-name');
+  if (nameEl) nameEl.textContent = channelName;
+
+  const resEl = document.getElementById('stream-resolution-text');
+  if (resEl) resEl.textContent = qualityText;
+
+  showOverlay(`Connecting to ${channelName}...`);
+  updateStreamStatus('buffering', 'Connecting...');
+
+  // Destroy existing HLS instance if any
+  if (liveTvHls) {
+    liveTvHls.destroy();
+    liveTvHls = null;
+  }
+
+  const effectiveUrl = getEffectiveStreamUrl(streamUrl);
+
+  // Use Hls.js if supported
+  if (window.Hls && Hls.isSupported()) {
+    liveTvHls = new Hls({
+      enableWorker: true,
+      lowLatencyMode: true,
+      manifestLoadingTimeOut: 12000,
+      manifestLoadingMaxRetry: 3,
+      levelLoadingTimeOut: 12000
+    });
+
+    liveTvHls.loadSource(effectiveUrl);
+    liveTvHls.attachMedia(video);
+
+    liveTvHls.on(Hls.Events.MANIFEST_PARSED, () => {
+      hideOverlay();
+      updateStreamStatus('online', 'Live');
+      video.play().catch(() => {
+        // Autoplay policy prevented playback, controls remain available for user interaction
+      });
+    });
+
+    liveTvHls.on(Hls.Events.ERROR, (event, data) => {
+      console.warn('HLS stream error:', data);
+      if (data.fatal) {
+        switch (data.type) {
+          case Hls.ErrorTypes.NETWORK_ERROR:
+            if (!effectiveUrl.includes('/api/iptv-proxy')) {
+              const proxyFallback = `/api/iptv-proxy?url=${encodeURIComponent(streamUrl)}`;
+              liveTvHls.loadSource(proxyFallback);
+            } else {
+              updateStreamStatus('error', 'Offline / Retry');
+              showOverlay('Stream connection lost. Please retry or switch to Backup Server.', true);
+            }
+            break;
+          case Hls.ErrorTypes.MEDIA_ERROR:
+            liveTvHls.recoverMediaError();
+            break;
+          default:
+            liveTvHls.destroy();
+            updateStreamStatus('error', 'Error');
+            showOverlay('Unable to play stream. Try Backup Server or Custom Stream.', true);
+            break;
+        }
+      }
+    });
+
+  } else if (video.canPlayType('application/vnd.apple.mpegurl')) {
+    // Native HLS (Safari, iOS, TV browsers)
+    video.src = effectiveUrl;
+    video.addEventListener('loadedmetadata', () => {
+      hideOverlay();
+      updateStreamStatus('online', 'Live');
+      video.play().catch(() => {});
+    }, { once: true });
+
+    video.onerror = () => {
+      updateStreamStatus('error', 'Error');
+      showOverlay('Playback error. Please retry or switch source.', true);
+    };
+  } else {
+    updateStreamStatus('error', 'Unsupported');
+    showOverlay('HLS streaming is not supported on this browser.', false);
+  }
+}
+
+function startLiveTV() {
+  const video = document.getElementById('livetv-video');
+  if (!video) return;
+
+  if (!video.src && !liveTvHls) {
+    loadLiveTvStream(currentStreamSource);
+  } else {
+    video.play().catch(() => {});
+  }
+}
+
+function pauseLiveTV() {
+  const video = document.getElementById('livetv-video');
+  if (video) {
+    video.pause();
+  }
+}
+
+function openCustomStreamModal() {
+  const modal = document.getElementById('custom-stream-modal');
+  const input = document.getElementById('custom-stream-input');
+  if (modal) {
+    modal.classList.remove('hidden');
+    if (input) {
+      input.value = localStorage.getItem('nba_custom_stream_url') || '';
+      input.focus();
+    }
+  }
+}
+
+function closeCustomStreamModal() {
+  const modal = document.getElementById('custom-stream-modal');
+  if (modal) modal.classList.add('hidden');
+}
+
+function initLiveTv() {
+  // Update M3U URL input with current origin
+  const m3uInput = document.getElementById('m3u-playlist-url');
+  if (m3uInput) {
+    m3uInput.value = `${window.location.origin}/nbatv.m3u`;
+  }
+
+  // Copy M3U Link button
+  const copyBtn = document.getElementById('copy-m3u-btn');
+  if (copyBtn && m3uInput) {
+    copyBtn.addEventListener('click', () => {
+      navigator.clipboard.writeText(m3uInput.value).then(() => {
+        const origText = copyBtn.textContent;
+        copyBtn.textContent = 'Copied!';
+        copyBtn.style.color = '#4ade80';
+        setTimeout(() => {
+          copyBtn.textContent = origText;
+          copyBtn.style.color = '';
+        }, 2000);
+      }).catch(() => {
+        m3uInput.select();
+        document.execCommand('copy');
+      });
+    });
+  }
+
+  // Channel select dropdown
+  const chanSelect = document.getElementById('channel-select');
+  if (chanSelect) {
+    chanSelect.addEventListener('change', (e) => {
+      const val = e.target.value;
+      if (val === 'custom') {
+        openCustomStreamModal();
+      } else {
+        loadLiveTvStream(val);
+      }
+    });
+  }
+
+  // Reload stream button
+  const refreshBtn = document.getElementById('livetv-refresh-btn');
+  if (refreshBtn) {
+    refreshBtn.addEventListener('click', () => {
+      loadLiveTvStream(currentStreamSource);
+    });
+  }
+
+  // Overlay retry button
+  const retryBtn = document.getElementById('overlay-retry-btn');
+  if (retryBtn) {
+    retryBtn.addEventListener('click', () => {
+      loadLiveTvStream(currentStreamSource);
+    });
+  }
+
+  // Theater Mode button
+  const theaterBtn = document.getElementById('theater-mode-btn');
+  const playerWrapper = document.getElementById('livetv-player-wrapper');
+  if (theaterBtn && playerWrapper) {
+    theaterBtn.addEventListener('click', () => {
+      playerWrapper.classList.toggle('theater-mode');
+      theaterBtn.classList.toggle('active');
+    });
+  }
+
+  // Fullscreen button
+  const fsBtn = document.getElementById('fullscreen-btn');
+  const video = document.getElementById('livetv-video');
+  if (fsBtn && video) {
+    fsBtn.addEventListener('click', () => {
+      if (!document.fullscreenElement) {
+        if (video.requestFullscreen) {
+          video.requestFullscreen();
+        } else if (video.webkitRequestFullscreen) {
+          video.webkitRequestFullscreen();
+        } else if (video.msRequestFullscreen) {
+          video.msRequestFullscreen();
+        }
+      } else {
+        if (document.exitFullscreen) document.exitFullscreen();
+      }
+    });
+  }
+
+  // Custom Stream Modal triggers
+  const customModalBtn = document.getElementById('custom-stream-btn');
+  if (customModalBtn) {
+    customModalBtn.addEventListener('click', openCustomStreamModal);
+  }
+
+  const closeCustomBtn = document.getElementById('close-custom-modal');
+  if (closeCustomBtn) {
+    closeCustomBtn.addEventListener('click', closeCustomStreamModal);
+  }
+
+  const customBackdrop = document.querySelector('.custom-stream-backdrop');
+  if (customBackdrop) {
+    customBackdrop.addEventListener('click', closeCustomStreamModal);
+  }
+
+  // Apply custom stream button
+  const applyCustomBtn = document.getElementById('apply-custom-stream');
+  const customInput = document.getElementById('custom-stream-input');
+  if (applyCustomBtn && customInput) {
+    applyCustomBtn.addEventListener('click', () => {
+      const url = customInput.value.trim();
+      if (!url) return;
+      localStorage.setItem('nba_custom_stream_url', url);
+      closeCustomStreamModal();
+      if (chanSelect) chanSelect.value = 'custom';
+      loadLiveTvStream('custom');
+    });
+  }
+
+  // Quick Presets in modal
+  document.querySelectorAll('.preset-btn[data-url]').forEach(btn => {
+    btn.addEventListener('click', () => {
+      const url = btn.getAttribute('data-url');
+      if (customInput) customInput.value = url;
+    });
+  });
+
+  const resetPresetBtn = document.getElementById('reset-stream-btn');
+  if (resetPresetBtn) {
+    resetPresetBtn.addEventListener('click', () => {
+      localStorage.removeItem('nba_custom_stream_url');
+      if (customInput) customInput.value = '';
+      closeCustomStreamModal();
+      if (chanSelect) chanSelect.value = 'primary';
+      loadLiveTvStream('primary');
+    });
+  }
+}
+
 // ===== INIT =====
 
 document.addEventListener('DOMContentLoaded', () => {
   initTabs();
   initConferenceToggle();
   initGameDetailListeners();
+  initLiveTv();
   loadGames().then(startCountdown);
 });
