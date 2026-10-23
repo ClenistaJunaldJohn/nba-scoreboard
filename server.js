@@ -7,62 +7,236 @@ const PORT = process.env.PORT || 3000;
 // Serve static files from current directory
 app.use(express.static(__dirname));
 
-// ===== STREAM LINK CHECKER =====
+// ===== LIVE NBA TV CHANNELS (FOR "WATCH NBA TV" BUTTON ONLY) =====
+const WATCH_NBATV_CHANNELS = [
+  {
+    id: 'primary',
+    name: 'NBA TV Philippines',
+    quality: '1080p 60FPS',
+    url: 'http://23.237.104.106:8080/USA_NBA/index.m3u8',
+    description: 'Official NBA TV broadcast feed with live games and studio coverage'
+  },
+  {
+    id: 'backup',
+    name: 'NBA TV Server 2',
+    quality: '1080p Direct Track',
+    url: 'http://23.237.104.106:8080/USA_NBA/tracks-v1a1/mono.m3u8',
+    description: 'High performance backup stream with low latency'
+  },
+  {
+    id: 'server3',
+    name: 'NBA TV Server 3',
+    quality: '720p Direct Feed',
+    url: 'http://198.58.104.90:8989/nba/index.m3u8',
+    description: 'Alternative direct live game feed'
+  }
+];
 
-// Check if a URL is reachable (HTTP 200-399)
-function checkURL(url) {
-  return new Promise((resolve) => {
+// Helper to fetch text with redirect support
+function fetchText(url, timeoutMs = 8000) {
+  return new Promise((resolve, reject) => {
     const parsed = new URL(url);
     const client = parsed.protocol === 'http:' ? http : https;
     const req = client.get(url, {
-      timeout: 6000,
+      timeout: timeoutMs,
       headers: {
         'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36'
       }
     }, (res) => {
-      // Drain the response body to free memory
-      res.resume();
-      // 200-399 means page exists (including redirects to the actual player page)
-      resolve(res.statusCode >= 200 && res.statusCode < 400);
+      if (res.statusCode >= 300 && res.statusCode < 400 && res.headers.location) {
+        try {
+          const redirected = new URL(res.headers.location, url).toString();
+          return fetchText(redirected, timeoutMs).then(resolve).catch(reject);
+        } catch (e) {
+          return reject(e);
+        }
+      }
+      let data = '';
+      res.on('data', chunk => data += chunk);
+      res.on('end', () => resolve(data));
     });
-    req.on('error', () => resolve(false));
-    req.on('timeout', () => { req.destroy(); resolve(false); });
+    req.on('error', reject);
+    req.on('timeout', () => { req.destroy(); reject(new Error(`Timeout fetching ${url}`)); });
   });
 }
 
-// API: Resolve the best working stream URL for a live game
-// Tries: away-vs-home, then home-vs-away, then returns best guess
-app.get('/api/stream-link', async (req, res) => {
-  const { away, home } = req.query;
-  const BASE = 'https://streamfree.app/player/basketball';
+// Parse M3U playlist with #EXTVLCOPT headers (http-referrer, http-user-agent)
+function parseM3UEvents(text) {
+  if (!text) return [];
+  const lines = text.split('\n');
+  const items = [];
+  let current = null;
 
-  if (!away || !home) {
-    return res.json({ url: 'https://streamfree.app/', checked: false });
+  for (let i = 0; i < lines.length; i++) {
+    const line = lines[i].trim();
+    if (line.startsWith('#EXTINF:')) {
+      if (current && current.url) items.push(current);
+      current = { extinf: line, referrer: '', userAgent: '', url: '' };
+    } else if (line.startsWith('#EXTVLCOPT:http-referrer=')) {
+      if (current) current.referrer = line.replace('#EXTVLCOPT:http-referrer=', '').trim();
+    } else if (line.startsWith('#EXTVLCOPT:http-user-agent=')) {
+      if (current) current.userAgent = line.replace('#EXTVLCOPT:http-user-agent=', '').trim();
+    } else if (line.startsWith('http://') || line.startsWith('https://')) {
+      if (current) {
+        current.url = line;
+        items.push(current);
+        current = null;
+      }
+    }
+  }
+  if (current && current.url) items.push(current);
+  return items;
+}
+
+// In-memory cache for doms9/iptv live events (90s TTL)
+let eventsCache = { data: null, timestamp: 0 };
+const EVENTS_CACHE_TTL = 90 * 1000;
+
+async function fetchEventsPlaylist() {
+  const now = Date.now();
+  if (eventsCache.data && (now - eventsCache.timestamp < EVENTS_CACHE_TTL)) {
+    return eventsCache.data;
   }
 
-  const primaryURL  = `${BASE}/${away}-vs-${home}`;
-  const fallbackURL = `${BASE}/${home}-vs-${away}`;
+  const primaryUrl = 'https://raw.githubusercontent.com/doms9/iptv/refs/heads/default/M3U8/events.m3u8';
+  const fallbackUrl = 'https://raw.githubusercontent.com/doms9/iptv/refs/heads/default/M3U8/kodi.m3u8';
+
+  let rawText = '';
+  try {
+    rawText = await fetchText(primaryUrl, 9000);
+  } catch (err) {
+    console.warn('Events playlist primary fetch failed, trying fallback:', err.message);
+    try {
+      rawText = await fetchText(fallbackUrl, 9000);
+    } catch (e2) {
+      console.error('All events playlist fetches failed:', e2.message);
+      return eventsCache.data || [];
+    }
+  }
+
+  const parsed = parseM3UEvents(rawText);
+  if (parsed.length > 0) {
+    eventsCache = { data: parsed, timestamp: now };
+  }
+  return parsed.length > 0 ? parsed : (eventsCache.data || []);
+}
+
+function formatServerDisplayName(rawTitle, idx) {
+  let title = rawTitle;
+  if (/NBA\s*League\s*Pass/i.test(title)) {
+    const tag = title.match(/\(([^)]+)\)$/)?.[1] || 'HD';
+    return `Server ${idx + 1} • NBA League Pass (${tag})`;
+  }
+  if (/ESPN\s*2\s*\|\s*HD/i.test(title)) {
+    const tag = title.match(/\(([^)]+)\)$/)?.[1] || 'TVF90';
+    return `Server ${idx + 1} • ESPN 2 HD (${tag})`;
+  }
+  if (/ESPN\s*2/i.test(title)) {
+    const tag = title.match(/\(([^)]+)\)$/)?.[1] || 'Feed';
+    return `Server ${idx + 1} • ESPN 2 (${tag})`;
+  }
+  if (/STRMCNTR/i.test(title)) {
+    return `Server ${idx + 1} • StreamCenter English HD`;
+  }
+  if (/\(XYZ\)/i.test(title)) {
+    return `Server ${idx + 1} • XYZ Stream (1080p)`;
+  }
+  if (/FUTBOLX/i.test(title)) {
+    return `Server ${idx + 1} • FutbolX Main Feed`;
+  }
+  if (/SPRTSPASS/i.test(title)) {
+    return `Server ${idx + 1} • SportsPass Direct`;
+  }
+  if (/FAWA/i.test(title)) {
+    const num = title.match(/(\d+)\s*\(FAWA\)/i)?.[1] || 'Feed';
+    return `Server ${idx + 1} • FAWA Sports Feed ${num}`;
+  }
+  if (/STRMGATE/i.test(title)) {
+    return `Server ${idx + 1} • StreamGate English`;
+  }
+  if (/DAMITV/i.test(title)) {
+    return `Server ${idx + 1} • DamiTV Live`;
+  }
+  if (/FLYEMBD/i.test(title)) {
+    return `Server ${idx + 1} • FlyEmbed Stream`;
+  }
+  if (/iSTRMEAST/i.test(title)) {
+    return `Server ${idx + 1} • StreamEast Feed`;
+  }
+  if (/TVF90/i.test(title)) {
+    const op = title.match(/OP\d+/i)?.[0] || 'Feed';
+    return `Server ${idx + 1} • TVF90 (${op})`;
+  }
+
+  title = title.replace(/^\[(Basketball|NBA|NBA Basketball|Live Event)\]\s*/i, '');
+  title = title.replace(/^[A-Za-z0-9\s.]+(vs\.?|at)\s+[A-Za-z0-9\s.]+\s*\|\s*/i, '');
+  title = title.replace(/^[A-Za-z0-9\s.]+(vs\.?|at)\s+[A-Za-z0-9\s.]+\s*/i, '');
+  title = title.trim();
+  if (!title) title = 'Live Game Feed';
+  return `Server ${idx + 1} • ${title}`;
+}
+
+// API: Resolve live broadcast HLS streams for a specific game from doms9/iptv
+app.get('/api/game-stream', async (req, res) => {
+  const { eventId, broadcast, away, home, awayAbbr, homeAbbr } = req.query;
 
   try {
-    // Try primary (away-vs-home) first
-    const primaryOk = await checkURL(primaryURL);
-    if (primaryOk) {
-      return res.json({ url: primaryURL, pattern: 'away-vs-home', checked: true });
-    }
+    const events = await fetchEventsPlaylist();
+    const awayWords = [
+      (away || '').toLowerCase(),
+      (awayAbbr || '').toLowerCase(),
+      ...((away || '').toLowerCase().split(/\s+/))
+    ].filter(w => w.length > 2);
 
-    // Try fallback (home-vs-away)
-    const fallbackOk = await checkURL(fallbackURL);
-    if (fallbackOk) {
-      return res.json({ url: fallbackURL, pattern: 'home-vs-away', checked: true });
-    }
+    const homeWords = [
+      (home || '').toLowerCase(),
+      (homeAbbr || '').toLowerCase(),
+      ...((home || '').toLowerCase().split(/\s+/))
+    ].filter(w => w.length > 2);
 
-    // Neither worked — return primary as best guess
-    return res.json({ url: primaryURL, pattern: 'away-vs-home', checked: false });
+    const matched = events.filter(it => {
+      const t = it.extinf.toLowerCase();
+      const hasAway = awayWords.some(w => t.includes(w));
+      const hasHome = homeWords.some(w => t.includes(w));
+      return hasAway && hasHome;
+    });
+
+    const activeServers = matched.map((m, idx) => {
+      const nameMatch = m.extinf.match(/tvg-name="([^"]+)"/) || m.extinf.match(/,(.+)$/);
+      const rawTitle = nameMatch ? nameMatch[1].trim() : 'Live Game';
+      return {
+        id: `doms9_${idx + 1}`,
+        rawTitle,
+        name: formatServerDisplayName(rawTitle, idx),
+        url: m.url,
+        referrer: m.referrer || '',
+        userAgent: m.userAgent || '',
+        quality: 'Live HD'
+      };
+    });
+
+    const displayBroadcast = broadcast && broadcast !== 'undefined' ? broadcast : 'NBA Live Broadcast';
+    const gameTitle = (away && home) ? `${away} vs ${home}` : 'Live Game';
+
+    res.json({
+      eventId: eventId || null,
+      gameTitle,
+      broadcast: displayBroadcast,
+      totalServers: activeServers.length,
+      activeServers
+    });
   } catch (err) {
-    console.error('Stream link check error:', err.message);
-    return res.json({ url: primaryURL, pattern: 'away-vs-home', checked: false });
+    console.error('Game stream resolver error:', err.message);
+    res.json({
+      eventId: eventId || null,
+      gameTitle: `${away || ''} vs ${home || ''}`,
+      broadcast: broadcast || 'NBA Live Broadcast',
+      totalServers: 0,
+      activeServers: []
+    });
   }
 });
+
 
 // ===== IPTV LIVE STREAM PROXY =====
 // Solves CORS and Mixed-Content (HTTPS site loading HTTP stream on Render/Smart TV)
@@ -86,11 +260,14 @@ app.get('/api/iptv-proxy', (req, res) => {
     return res.status(400).send('Invalid url parameter');
   }
 
+  const customReferrer = req.query.referrer || req.query.ref || '';
+  const effectiveReferrer = customReferrer || (parsedUrl.origin + '/');
+  const customUserAgent = req.query.userAgent || 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36';
   const client = parsedUrl.protocol === 'http:' ? http : https;
   const proxyReq = client.get(targetUrl, {
     headers: {
-      'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
-      'Referer': parsedUrl.origin + '/'
+      'User-Agent': customUserAgent,
+      'Referer': effectiveReferrer
     },
     timeout: 12000
   }, (proxyRes) => {
@@ -98,7 +275,9 @@ app.get('/api/iptv-proxy', (req, res) => {
     if (proxyRes.statusCode >= 300 && proxyRes.statusCode < 400 && proxyRes.headers.location) {
       try {
         const redirected = new URL(proxyRes.headers.location, targetUrl).toString();
-        return res.redirect(`/api/iptv-proxy?url=${encodeURIComponent(redirected)}`);
+        let redirectUrl = `/api/iptv-proxy?url=${encodeURIComponent(redirected)}`;
+        if (customReferrer) redirectUrl += `&referrer=${encodeURIComponent(customReferrer)}`;
+        return res.redirect(redirectUrl);
       } catch (e) {
         return res.redirect(proxyRes.headers.location);
       }
@@ -119,13 +298,28 @@ app.get('/api/iptv-proxy', (req, res) => {
       let body = '';
       proxyRes.on('data', chunk => { body += chunk; });
       proxyRes.on('end', () => {
+        const refParam = customReferrer ? `&referrer=${encodeURIComponent(customReferrer)}` : '';
         // Rewrite all URI lines in the m3u8 playlist to route back through this proxy
         const rewritten = body.split('\n').map(line => {
           const trimmed = line.trim();
-          if (!trimmed || trimmed.startsWith('#')) return line;
+          if (!trimmed) return line;
+
+          // Rewrite EXT-X-KEY or EXT-X-MAP URIs if present
+          if (trimmed.startsWith('#EXT-X-KEY:') || trimmed.startsWith('#EXT-X-MAP:')) {
+            return line.replace(/URI="([^"]+)"/, (m, uri) => {
+              try {
+                const absolute = new URL(uri, targetUrl).toString();
+                return `URI="/api/iptv-proxy?url=${encodeURIComponent(absolute)}${refParam}"`;
+              } catch (e) {
+                return m;
+              }
+            });
+          }
+
+          if (trimmed.startsWith('#')) return line;
           try {
             const absoluteUrl = new URL(trimmed, targetUrl).toString();
-            return `/api/iptv-proxy?url=${encodeURIComponent(absoluteUrl)}`;
+            return `/api/iptv-proxy?url=${encodeURIComponent(absoluteUrl)}${refParam}`;
           } catch (e) {
             return line;
           }
@@ -154,24 +348,9 @@ app.get('/api/iptv-proxy', (req, res) => {
   });
 });
 
-// API: Channels catalog
+// API: Channels catalog strictly for Watch NBA TV button
 app.get('/api/iptv/channels', (req, res) => {
-  res.json([
-    {
-      id: 'primary',
-      name: 'NBA TV Philippines',
-      quality: '1080p 60FPS',
-      url: 'http://23.237.104.106:8080/USA_NBA/index.m3u8',
-      description: 'Official NBA TV broadcast feed with live games and studio coverage'
-    },
-    {
-      id: 'backup',
-      name: 'NBA TV Server 2',
-      quality: '1080p Direct Track',
-      url: 'http://23.237.104.106:8080/USA_NBA/tracks-v1a1/mono.m3u8',
-      description: 'High performance backup stream with low latency'
-    }
-  ]);
+  res.json(WATCH_NBATV_CHANNELS);
 });
 
 // ===== POWER RANKINGS & LEAGUE LEADERS API =====

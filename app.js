@@ -49,18 +49,30 @@ function getTeamLogo(team) {
 }
 
 function getTeamName(team) {
+  if (!team) return 'TBD';
+  if (typeof team === 'string') return team;
   if (team.team && team.team.shortDisplayName) return team.team.shortDisplayName;
   if (team.team && team.team.displayName) return team.team.displayName;
+  if (team.shortDisplayName) return team.shortDisplayName;
+  if (team.displayName) return team.displayName;
   return 'TBD';
 }
 
 function getTeamAbbr(team) {
-  return team.team ? team.team.abbreviation : '???';
+  if (!team) return '???';
+  if (typeof team === 'string') return team;
+  if (team.team && team.team.abbreviation) return team.team.abbreviation;
+  if (team.abbreviation) return team.abbreviation;
+  return '???';
 }
 
 function getTeamFullName(team) {
+  if (!team) return 'TBD';
+  if (typeof team === 'string') return team;
   if (team.team && team.team.displayName) return team.team.displayName;
   if (team.team && team.team.shortDisplayName) return team.team.shortDisplayName;
+  if (team.displayName) return team.displayName;
+  if (team.shortDisplayName) return team.shortDisplayName;
   return 'TBD';
 }
 
@@ -86,92 +98,62 @@ function getTeamColor(team) {
   return TEAM_COLORS[abbr] || '#1a2e44';
 }
 
-// ===== STREAMFREE LIVE STREAM HELPERS =====
+// ===== LIVE BROADCAST HLS STREAM CONFIGURATION =====
 
-const STREAMFREE_BASE = 'https://streamfree.app';
-
-// Map ESPN full team names → StreamFree URL slugs
-const TEAM_SLUG_MAP = {
-  'Atlanta Hawks': 'atlanta-hawks',
-  'Boston Celtics': 'boston-celtics',
-  'Brooklyn Nets': 'brooklyn-nets',
-  'Charlotte Hornets': 'charlotte-hornets',
-  'Chicago Bulls': 'chicago-bulls',
-  'Cleveland Cavaliers': 'cleveland-cavaliers',
-  'Dallas Mavericks': 'dallas-mavericks',
-  'Denver Nuggets': 'denver-nuggets',
-  'Detroit Pistons': 'detroit-pistons',
-  'Golden State Warriors': 'golden-state-warriors',
-  'Houston Rockets': 'houston-rockets',
-  'Indiana Pacers': 'indiana-pacers',
-  'LA Clippers': 'la-clippers',
-  'Los Angeles Clippers': 'la-clippers',
-  'Los Angeles Lakers': 'los-angeles-lakers',
-  'Memphis Grizzlies': 'memphis-grizzlies',
-  'Miami Heat': 'miami-heat',
-  'Milwaukee Bucks': 'milwaukee-bucks',
-  'Minnesota Timberwolves': 'minnesota-timberwolves',
-  'New Orleans Pelicans': 'new-orleans-pelicans',
-  'New York Knicks': 'new-york-knicks',
-  'Oklahoma City Thunder': 'oklahoma-city-thunder',
-  'Orlando Magic': 'orlando-magic',
-  'Philadelphia 76ers': 'philadelphia-76ers',
-  'Phoenix Suns': 'phoenix-suns',
-  'Portland Trail Blazers': 'portland-trail-blazers',
-  'Sacramento Kings': 'sacramento-kings',
-  'San Antonio Spurs': 'san-antonio-spurs',
-  'Toronto Raptors': 'toronto-raptors',
-  'Utah Jazz': 'utah-jazz',
-  'Washington Wizards': 'washington-wizards'
+const LIVE_CHANNELS = {
+  primary: {
+    id: 'primary',
+    name: 'NBA TV Philippines (Primary - 1080p)',
+    url: 'http://23.237.104.106:8080/USA_NBA/index.m3u8',
+    quality: '1080p 60FPS'
+  },
+  backup: {
+    id: 'backup',
+    name: 'NBA TV Server 2 (Direct Track)',
+    url: 'http://23.237.104.106:8080/USA_NBA/tracks-v1a1/mono.m3u8',
+    quality: '1080p Direct Track'
+  },
+  server3: {
+    id: 'server3',
+    name: 'NBA TV Server 3 (Live Feed)',
+    url: 'http://198.58.104.90:8989/nba/index.m3u8',
+    quality: '720p Direct Feed'
+  }
 };
 
-function slugifyTeamName(fullName) {
-  if (TEAM_SLUG_MAP[fullName]) return TEAM_SLUG_MAP[fullName];
-  // Generic fallback: lowercase, replace non-alphanum with hyphens, trim hyphens
-  return fullName.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/(^-|-$)/g, '');
-}
-
-function buildStreamFreeURL(awaySlug, homeSlug) {
-  return `${STREAMFREE_BASE}/player/basketball/${awaySlug}-vs-${homeSlug}`;
-}
-
-// Ask our server proxy to find the working stream URL (tries both team orderings)
-async function resolveStreamLink(awaySlug, homeSlug) {
-  try {
-    const res = await fetch(`/api/stream-link?away=${encodeURIComponent(awaySlug)}&home=${encodeURIComponent(homeSlug)}`);
-    if (!res.ok) throw new Error('proxy error');
-    const data = await res.json();
-    return data.url;
-  } catch (err) {
-    console.warn('Stream link check failed, using default URL:', err);
-    return buildStreamFreeURL(awaySlug, homeSlug);
+function getEffectiveStreamUrl(rawUrl, referrer = '') {
+  if (!rawUrl) return '';
+  // Proxy all streams via /api/iptv-proxy to handle CORS headers, SSL mixed-content, and CDN referrer requirements
+  let proxyUrl = `/api/iptv-proxy?url=${encodeURIComponent(rawUrl)}`;
+  if (referrer) {
+    proxyUrl += `&referrer=${encodeURIComponent(referrer)}`;
   }
+  return proxyUrl;
 }
 
-// After game cards render, async-check & update all live stream buttons
-async function updateLiveStreamLinks() {
-  const buttons = document.querySelectorAll('.live-thumb[data-away-slug]');
-  const promises = Array.from(buttons).map(async (btn) => {
-    const awaySlug = btn.getAttribute('data-away-slug');
-    const homeSlug = btn.getAttribute('data-home-slug');
-    if (!awaySlug || !homeSlug) return;
-
-    const workingURL = await resolveStreamLink(awaySlug, homeSlug);
-    btn.href = workingURL;
-    btn.classList.remove('checking');
-    btn.title = `Watch live on StreamFree`;
-  });
-  await Promise.all(promises);
+// Format date nicely for YouTube search (e.g. "October 23, 2026")
+function formatYouTubeDate(dateStr) {
+  const d = dateStr ? new Date(dateStr) : new Date();
+  if (isNaN(d.getTime())) {
+    const today = new Date();
+    return today.toLocaleDateString('en-US', { month: 'long', day: 'numeric', year: 'numeric' });
+  }
+  return d.toLocaleDateString('en-US', { month: 'long', day: 'numeric', year: 'numeric' });
 }
 
-function buildYouTubeLink(awayTeam, homeTeam, date) {
+// Search bar keyword formula requested by user: "Team vs Team" + "Date Today"
+// e.g. "Cleveland Cavaliers vs Philadelphia 76ers October 23, 2026"
+// For preview games: append "Preview"
+function getYouTubeSearchQuery(awayTeam, homeTeam, dateStr, isPreview = false) {
   const awayName = getTeamFullName(awayTeam);
   const homeName = getTeamFullName(homeTeam);
-  const d = new Date(date);
-  const month = d.toLocaleString('en-US', { month: 'long' });
-  const day = d.getDate();
-  const year = d.getFullYear();
-  const query = `${awayName} vs ${homeName} Full Game Highlights ${month} ${day} ${year} NBA`;
+  const dateFormatted = formatYouTubeDate(dateStr);
+  const baseQuery = `${awayName} vs ${homeName} ${dateFormatted}`;
+  return isPreview ? `${baseQuery} Preview` : baseQuery;
+}
+
+function buildYouTubeLink(awayTeam, homeTeam, date, isPreview = false) {
+  const query = getYouTubeSearchQuery(awayTeam, homeTeam, date, isPreview);
   return `https://www.youtube.com/results?search_query=${encodeURIComponent(query)}`;
 }
 
@@ -242,8 +224,6 @@ function renderAllGames() {
       todayEl.innerHTML = filteredToday.map(e => renderGameCard(e, 'Tomorrow')).join('');
     }
   }
-
-  updateLiveStreamLinks();
 }
 
 function initGamesControls() {
@@ -372,20 +352,17 @@ function renderGameCard(event, dayLabel = 'Today') {
   // Status Badge & Action Button
   let statusBadgeHTML = '';
   let actionBtnHTML = '';
-  const youtubeURL = buildYouTubeLink(away, home, event.date);
 
   if (isFinal) {
+    const youtubeURL = buildYouTubeLink(away, home, event.date, false);
     statusBadgeHTML = `<div class="game-status-badge status-final">FINAL</div>`;
     actionBtnHTML = `
-      <a href="${youtubeURL}" target="_blank" rel="noopener" class="card-action-btn btn-highlights" title="Watch full highlights on YouTube">
+      <a href="${youtubeURL}" target="_blank" rel="noopener" class="card-action-btn btn-highlights" title="Watch full highlights on YouTube (${formatYouTubeDate(event.date)})">
         ▶ Highlights
       </a>
     `;
   } else if (isLive) {
     const detail = statusType.shortDetail || statusType.detail || 'LIVE';
-    const awaySlug = slugifyTeamName(getTeamFullName(away));
-    const homeSlug = slugifyTeamName(getTeamFullName(home));
-    const defaultStreamURL = buildStreamFreeURL(awaySlug, homeSlug);
 
     statusBadgeHTML = `
       <div class="game-status-badge status-live">
@@ -393,19 +370,19 @@ function renderGameCard(event, dayLabel = 'Today') {
       </div>
     `;
     actionBtnHTML = `
-      <a href="${defaultStreamURL}" target="_blank" rel="noopener"
-         class="card-action-btn btn-live live-thumb checking"
-         data-away-slug="${awaySlug}" data-home-slug="${homeSlug}"
-         title="Watch Live Stream">
-        🔴 Watch Live
-      </a>
+      <button type="button" class="card-action-btn btn-live card-watch-live-btn"
+              data-event-id="${event.id}"
+              title="Watch Live Game Broadcast">
+        <span class="live-dot-pulse"></span> Watch Live
+      </button>
     `;
   } else {
-    // Scheduled
+    // Scheduled (Upcoming)
     const gameTime = formatGameTime(event.date);
+    const youtubePreviewURL = buildYouTubeLink(away, home, event.date, true);
     statusBadgeHTML = `<div class="game-status-badge status-scheduled">⏰ ${gameTime}</div>`;
     actionBtnHTML = `
-      <a href="${youtubeURL}" target="_blank" rel="noopener" class="card-action-btn btn-preview" title="Game Preview on YouTube">
+      <a href="${youtubePreviewURL}" target="_blank" rel="noopener" class="card-action-btn btn-preview" title="Game Preview & Analysis on YouTube">
         📅 Preview
       </a>
     `;
@@ -964,6 +941,7 @@ function initTabs() {
       } else if (target === 'powerrankings') {
         loadPowerRankings();
       } else if (target === 'livetv') {
+        destroyDetailGamePlayer();
         startLiveTV();
       }
 
@@ -1817,15 +1795,18 @@ async function fetchGameSummary(eventId) {
 }
 
 function getPlayerStats(boxScore, teamIndex) {
-  if (!boxScore || !boxScore.players || !boxScore.players[teamIndex]) return [];
+  if (!boxScore || !boxScore.players || !boxScore.players[teamIndex]) return null;
   const teamData = boxScore.players[teamIndex];
   const stats = teamData.statistics && teamData.statistics[0];
-  if (!stats) return [];
+  if (!stats) return null;
   return {
+    team: teamData.team || {},
     labels: stats.labels || [],
     athletes: (stats.athletes || []).map(a => ({
       name: a.athlete ? (a.athlete.shortName || a.athlete.displayName || 'Unknown') : 'Unknown',
+      fullName: a.athlete?.displayName || a.athlete?.fullName || 'Unknown',
       position: a.athlete ? (a.athlete.position?.abbreviation || '') : '',
+      jersey: a.athlete?.jersey || '',
       headshot: a.athlete?.headshot?.href || '',
       stats: a.stats || [],
       starter: a.starter || false,
@@ -1842,16 +1823,16 @@ function getTeamStats(boxScore, teamIndex) {
   return stats;
 }
 
-function renderPlayerStatsTable(playerData, teamName, teamColor) {
+function renderPlayerStatsTable(playerData, teamName, teamColor, teamLogo) {
   if (!playerData || !playerData.athletes || playerData.athletes.length === 0) {
-    return `<div class="detail-no-data">No player stats available</div>`;
+    return `<div class="detail-no-data">No player statistics recorded for this game.</div>`;
   }
 
-  const labels = playerData.labels;
-  // Key stat columns to show
-  const showCols = ['MIN', 'PTS', 'REB', 'AST', 'STL', 'BLK', 'FG', '3PT', 'FT', 'TO', '+/-'];
-  const colIndices = showCols.map(col => labels.indexOf(col)).filter(i => i >= 0);
+  const labels = playerData.labels || [];
+  const targetCols = ['MIN', 'PTS', 'REB', 'AST', 'STL', 'BLK', 'FG', '3PT', 'FT', 'TO', '+/-'];
+  const colIndices = targetCols.map(col => labels.indexOf(col)).filter(i => i >= 0);
   const colNames = colIndices.map(i => labels[i]);
+  const ptsIdx = labels.indexOf('PTS');
 
   const starters = playerData.athletes.filter(a => a.starter && !a.didNotPlay);
   const bench = playerData.athletes.filter(a => !a.starter && !a.didNotPlay);
@@ -1859,12 +1840,35 @@ function renderPlayerStatsTable(playerData, teamName, teamColor) {
 
   function renderRows(players) {
     return players.map(p => {
-      const statCells = colIndices.map(i => `<td>${p.stats[i] || '-'}</td>`).join('');
+      const ptsVal = ptsIdx >= 0 ? parseInt(p.stats[ptsIdx]) || 0 : 0;
+      const isHighScorer = ptsVal >= 20;
+      const isEpicScorer = ptsVal >= 30;
+
+      const statCells = colIndices.map(i => {
+        const val = p.stats[i] || '-';
+        const label = labels[i];
+        const isPts = label === 'PTS';
+        const cellClass = isPts ? (isEpicScorer ? 'stat-epic-pts' : (isHighScorer ? 'stat-high-pts' : 'stat-pts')) : '';
+        return `<td class="${cellClass}">${val}</td>`;
+      }).join('');
+
+      const avatarHTML = p.headshot
+        ? `<img src="${p.headshot}" class="player-table-avatar" alt="${p.name}" loading="lazy" onerror="this.style.display='none'" />`
+        : `<span class="player-table-avatar-fallback">${p.name.charAt(0)}</span>`;
+
       return `
-        <tr>
+        <tr class="player-stat-row">
           <td class="player-name-cell">
-            <span class="player-name">${p.name}</span>
-            <span class="player-pos">${p.position}</span>
+            <div class="player-cell-content">
+              ${avatarHTML}
+              <div class="player-cell-meta">
+                <span class="player-name ${isHighScorer ? 'highlight-player' : ''}">
+                  ${p.fullName || p.name}
+                  ${isEpicScorer ? '<span class="scorer-crown" title="30+ PTS Game">👑</span>' : ''}
+                </span>
+                <span class="player-sub">${p.jersey ? '#' + p.jersey : ''}${p.position ? (p.jersey ? ' • ' : '') + p.position : ''}</span>
+              </div>
+            </div>
           </td>
           ${statCells}
         </tr>
@@ -1873,16 +1877,20 @@ function renderPlayerStatsTable(playerData, teamName, teamColor) {
   }
 
   let html = `
-    <div class="detail-team-stats-block">
-      <div class="detail-team-header" style="border-left: 4px solid ${teamColor};">
-        ${teamName}
+    <div class="detail-team-stats-block" data-team="${playerData.team?.abbreviation || ''}">
+      <div class="detail-team-boxscore-header" style="border-left: 4px solid ${teamColor};">
+        <div class="boxscore-header-left">
+          ${teamLogo ? `<img src="${teamLogo}" class="boxscore-team-logo" alt="${teamName}" />` : ''}
+          <span class="boxscore-team-title">${teamName}</span>
+        </div>
+        <span class="boxscore-count-badge">${playerData.athletes.length} Players</span>
       </div>
       <div class="detail-stats-table-wrap">
         <table class="detail-stats-table">
           <thead>
             <tr>
               <th class="player-name-col">Player</th>
-              ${colNames.map(c => `<th>${c}</th>`).join('')}
+              ${colNames.map(c => `<th class="${c === 'PTS' ? 'col-pts-header' : ''}">${c}</th>`).join('')}
             </tr>
           </thead>
           <tbody>
@@ -1899,7 +1907,23 @@ function renderPlayerStatsTable(playerData, teamName, teamColor) {
   if (dnp.length > 0) {
     html += `<tr class="section-divider"><td colspan="${colNames.length + 1}">Did Not Play</td></tr>`;
     dnp.forEach(p => {
-      html += `<tr class="dnp-row"><td class="player-name-cell"><span class="player-name">${p.name}</span></td><td colspan="${colNames.length}">${p.reason || 'DNP'}</td></tr>`;
+      const avatarHTML = p.headshot
+        ? `<img src="${p.headshot}" class="player-table-avatar" alt="${p.name}" loading="lazy" onerror="this.style.display='none'" />`
+        : `<span class="player-table-avatar-fallback">${p.name.charAt(0)}</span>`;
+      html += `
+        <tr class="dnp-row">
+          <td class="player-name-cell">
+            <div class="player-cell-content">
+              ${avatarHTML}
+              <div class="player-cell-meta">
+                <span class="player-name">${p.fullName || p.name}</span>
+                <span class="player-sub">${p.jersey ? '#' + p.jersey : ''}${p.position ? ' ' + p.position : ''}</span>
+              </div>
+            </div>
+          </td>
+          <td colspan="${colNames.length}" class="dnp-reason">${p.reason || 'DNP — Coach\'s Decision'}</td>
+        </tr>
+      `;
     });
   }
 
@@ -1907,9 +1931,9 @@ function renderPlayerStatsTable(playerData, teamName, teamColor) {
   return html;
 }
 
-function renderTeamComparisonStats(boxScore) {
+function renderTeamComparisonStats(boxScore, awayFullName, homeFullName, awayColor, homeColor, awayLogo, homeLogo) {
   if (!boxScore || !boxScore.teams || boxScore.teams.length < 2) {
-    return '';
+    return `<div class="detail-no-data">Team comparison statistics will update as the game progresses.</div>`;
   }
 
   const team1 = boxScore.teams[0];
@@ -1917,85 +1941,394 @@ function renderTeamComparisonStats(boxScore) {
   const stats1 = team1.statistics || [];
   const stats2 = team2.statistics || [];
 
-  // Key team stats to display
   const keyStats = [
-    'fieldGoalPct', 'threePointFieldGoalPct', 'freeThrowPct',
-    'totalRebounds', 'offensiveRebounds', 'defensiveRebounds',
-    'assists', 'steals', 'blocks', 'turnovers',
-    'fastBreakPoints', 'pointsInPaint', 'pointsOffTurnovers'
+    { key: 'fieldGoalPct', label: 'Field Goal %', isPct: true, isLower: false },
+    { key: 'threePointFieldGoalPct', label: '3-Point %', isPct: true, isLower: false },
+    { key: 'freeThrowPct', label: 'Free Throw %', isPct: true, isLower: false },
+    { key: 'totalRebounds', label: 'Total Rebounds', isPct: false, isLower: false },
+    { key: 'offensiveRebounds', label: 'Offensive Reb', isPct: false, isLower: false },
+    { key: 'defensiveRebounds', label: 'Defensive Reb', isPct: false, isLower: false },
+    { key: 'assists', label: 'Assists', isPct: false, isLower: false },
+    { key: 'steals', label: 'Steals', isPct: false, isLower: false },
+    { key: 'blocks', label: 'Blocks', isPct: false, isLower: false },
+    { key: 'turnovers', label: 'Turnovers', isPct: false, isLower: true },
+    { key: 'pointsInPaint', label: 'Points in Paint', isPct: false, isLower: false },
+    { key: 'fastBreakPoints', label: 'Fast Break Pts', isPct: false, isLower: false },
+    { key: 'pointsOffTurnovers', label: 'Pts off Turnovers', isPct: false, isLower: false }
   ];
 
-  const statLabels = {
-    fieldGoalPct: 'FG%', threePointFieldGoalPct: '3PT%', freeThrowPct: 'FT%',
-    totalRebounds: 'Rebounds', offensiveRebounds: 'Off. Reb', defensiveRebounds: 'Def. Reb',
-    assists: 'Assists', steals: 'Steals', blocks: 'Blocks', turnovers: 'Turnovers',
-    fastBreakPoints: 'Fast Break Pts', pointsInPaint: 'Points in Paint',
-    pointsOffTurnovers: 'Pts off Turnovers'
-  };
-
-  let rows = '';
-  keyStats.forEach(key => {
-    const s1 = stats1.find(s => s.name === key);
-    const s2 = stats2.find(s => s.name === key);
+  let barsHTML = '';
+  keyStats.forEach(item => {
+    const s1 = stats1.find(s => s.name === item.key);
+    const s2 = stats2.find(s => s.name === item.key);
     if (!s1 && !s2) return;
-    const v1 = s1 ? (s1.displayValue || s1.value || '-') : '-';
-    const v2 = s2 ? (s2.displayValue || s2.value || '-') : '-';
-    const label = statLabels[key] || key;
 
-    // Highlight higher value
+    const v1 = s1 ? (s1.displayValue || s1.value || '0') : '0';
+    const v2 = s2 ? (s2.displayValue || s2.value || '0') : '0';
     const n1 = parseFloat(v1) || 0;
     const n2 = parseFloat(v2) || 0;
-    const isLower = key === 'turnovers'; // lower is better
-    const cls1 = isLower ? (n1 < n2 ? 'stat-better' : '') : (n1 > n2 ? 'stat-better' : '');
-    const cls2 = isLower ? (n2 < n1 ? 'stat-better' : '') : (n2 > n1 ? 'stat-better' : '');
 
-    rows += `
-      <tr>
-        <td class="team-stat-val ${cls1}">${v1}</td>
-        <td class="team-stat-label">${label}</td>
-        <td class="team-stat-val ${cls2}">${v2}</td>
-      </tr>
+    const is1Better = item.isLower ? (n1 < n2) : (n1 > n2);
+    const is2Better = item.isLower ? (n2 < n1) : (n2 > n1);
+
+    const sum = (n1 + n2) || 1;
+    const pct1 = Math.min(100, Math.max(12, Math.round((n1 / sum) * 100)));
+    const pct2 = Math.min(100, Math.max(12, Math.round((n2 / sum) * 100)));
+
+    barsHTML += `
+      <div class="team-comp-row">
+        <div class="comp-val comp-val-left ${is1Better ? 'better' : ''}">${v1}${item.isPct && !v1.includes('%') ? '%' : ''}</div>
+        <div class="comp-bars-wrap">
+          <div class="comp-bar-half left">
+            <div class="comp-bar-fill left ${is1Better ? 'glow' : ''}" style="width: ${pct1}%; background: ${awayColor};"></div>
+          </div>
+          <div class="comp-label">${item.label}</div>
+          <div class="comp-bar-half right">
+            <div class="comp-bar-fill right ${is2Better ? 'glow' : ''}" style="width: ${pct2}%; background: ${homeColor};"></div>
+          </div>
+        </div>
+        <div class="comp-val comp-val-right ${is2Better ? 'better' : ''}">${v2}${item.isPct && !v2.includes('%') ? '%' : ''}</div>
+      </div>
     `;
   });
 
-  if (!rows) return '';
+  return `
+    <div class="detail-section detail-comp-section">
+      <div class="team-comp-legend">
+        <div class="comp-team-legend-item left">
+          ${awayLogo ? `<img src="${awayLogo}" class="comp-legend-logo" alt="${awayFullName}" />` : ''}
+          <span class="comp-legend-name">${awayFullName}</span>
+        </div>
+        <div class="comp-legend-center">HEAD-TO-HEAD STATS</div>
+        <div class="comp-team-legend-item right">
+          <span class="comp-legend-name">${homeFullName}</span>
+          ${homeLogo ? `<img src="${homeLogo}" class="comp-legend-logo" alt="${homeFullName}" />` : ''}
+        </div>
+      </div>
+      <div class="team-comp-bars-list">
+        ${barsHTML}
+      </div>
+    </div>
+  `;
+}
 
-  const name1 = team1.team?.shortDisplayName || team1.team?.displayName || 'Team 1';
-  const name2 = team2.team?.shortDisplayName || team2.team?.displayName || 'Team 2';
-  const logo1 = team1.team?.logo || '';
-  const logo2 = team2.team?.logo || '';
+function renderModalGameLeaders(leaders, awayAbbr, homeAbbr, awayColor, homeColor) {
+  if (!leaders || leaders.length === 0) return '';
+
+  const categories = [
+    { key: 'points', label: 'Points Leader', icon: '🔥', statKey: 'PTS' },
+    { key: 'rebounds', label: 'Rebounds Leader', icon: '💪', statKey: 'REB' },
+    { key: 'assists', label: 'Assists Leader', icon: '🎯', statKey: 'AST' }
+  ];
+
+  let cardsHTML = '';
+
+  categories.forEach(cat => {
+    // Find leader for each team
+    let awayLeader = null;
+    let homeLeader = null;
+
+    leaders.forEach(tl => {
+      const isAwayTeam = tl.team?.abbreviation === awayAbbr;
+      const cObj = (tl.leaders || []).find(c => c.name === cat.key);
+      const lead = cObj?.leaders?.[0];
+      if (lead) {
+        if (isAwayTeam) awayLeader = { ...lead, team: tl.team };
+        else homeLeader = { ...lead, team: tl.team };
+      }
+    });
+
+    if (!awayLeader && !homeLeader) return;
+
+    function renderLeaderSide(l, teamColor, alignRight = false) {
+      if (!l) return '<div class="leader-player-side empty">—</div>';
+      const a = l.athlete || {};
+      const name = a.displayName || a.fullName || 'Player';
+      const jersey = a.jersey ? `#${a.jersey}` : '';
+      const pos = a.position?.abbreviation || '';
+      const headshot = a.headshot?.href || '';
+      const statVal = l.displayValue || l.value || '0';
+      const summary = l.summary || '';
+
+      const avatar = headshot
+        ? `<img src="${headshot}" class="leader-headshot" alt="${name}" onerror="this.style.display='none'" />`
+        : `<div class="leader-headshot-fallback">${name.charAt(0)}</div>`;
+
+      return `
+        <div class="leader-player-side ${alignRight ? 'align-right' : ''}">
+          <div class="leader-avatar-wrap" style="border-color: ${teamColor};">
+            ${avatar}
+            <span class="leader-jersey-pill" style="background:${teamColor};">${jersey || pos || '★'}</span>
+          </div>
+          <div class="leader-meta">
+            <span class="leader-name" title="${name}">${name}</span>
+            <span class="leader-pos">${pos ? pos + ' • ' : ''}${l.team?.abbreviation || ''}</span>
+            <div class="leader-stat-badge">
+              <span class="leader-stat-num">${statVal}</span>
+              <span class="leader-stat-label">${cat.statKey}</span>
+            </div>
+            ${summary ? `<span class="leader-summary-note" title="${summary}">${summary}</span>` : ''}
+          </div>
+        </div>
+      `;
+    }
+
+    cardsHTML += `
+      <div class="leader-duel-card">
+        <div class="leader-card-header">
+          <span class="leader-cat-icon">${cat.icon}</span>
+          <span class="leader-cat-title">${cat.label}</span>
+        </div>
+        <div class="leader-duel-body">
+          ${renderLeaderSide(awayLeader, awayColor, false)}
+          <div class="leader-vs-divider">VS</div>
+          ${renderLeaderSide(homeLeader, homeColor, true)}
+        </div>
+      </div>
+    `;
+  });
+
+  if (!cardsHTML) return '';
 
   return `
-    <div class="detail-section">
-      <h3 class="detail-section-title">Team Stats</h3>
-      <table class="team-comparison-table">
-        <thead>
-          <tr>
-            <th class="comp-team-header">
-              ${logo1 ? `<img src="${logo1}" class="comp-team-logo" />` : ''}
-              ${name1}
-            </th>
-            <th></th>
-            <th class="comp-team-header">
-              ${logo2 ? `<img src="${logo2}" class="comp-team-logo" />` : ''}
-              ${name2}
-            </th>
-          </tr>
-        </thead>
-        <tbody>${rows}</tbody>
-      </table>
+    <div class="detail-section detail-leaders-section">
+      <div class="detail-section-header">
+        <h3 class="detail-section-title">⭐ Top Game Performers</h3>
+        <span class="detail-section-badge">Head-to-Head Duel</span>
+      </div>
+      <div class="leader-duels-grid">
+        ${cardsHTML}
+      </div>
+    </div>
+  `;
+}
+
+function renderModalHighlightsBanner(awayFullName, homeFullName, eventDate) {
+  // Strictly formatted: "Team vs Team" + "Date Today"
+  const ytQuery = getYouTubeSearchQuery(awayFullName, homeFullName, eventDate, false);
+  const ytHighlightsURL = `https://www.youtube.com/results?search_query=${encodeURIComponent(ytQuery)}`;
+  const ytRecapURL = `https://www.youtube.com/results?search_query=${encodeURIComponent(ytQuery + ' Full Highlights Recap')}`;
+  const ytPlaysURL = `https://www.youtube.com/results?search_query=${encodeURIComponent(ytQuery + ' Top Plays Dunks')}`;
+
+  return `
+    <div class="detail-highlights-banner">
+      <div class="detail-yt-hero-card">
+        <div class="yt-hero-glow"></div>
+        <div class="yt-hero-header">
+          <div class="yt-badge">
+            <span class="yt-badge-icon">▶</span>
+            <span class="yt-badge-text">OFFICIAL YOUTUBE HIGHLIGHTS</span>
+          </div>
+          <span class="yt-verified-pill">NBA Game Highlights</span>
+        </div>
+
+        <div class="yt-hero-body">
+          <h4 class="yt-hero-title">${awayFullName} vs ${homeFullName} Highlights</h4>
+          <p class="yt-hero-subtitle">Watch official game highlights, clutch plays, and full recap video directly on YouTube.</p>
+
+          <div class="yt-cta-group">
+            <a href="${ytHighlightsURL}" target="_blank" rel="noopener" class="detail-yt-primary-btn" title="Watch full highlights on YouTube">
+              <span class="yt-play-triangle">▶</span> Watch Full Game Highlights on YouTube
+            </a>
+            <div class="yt-sub-actions">
+              <a href="${ytRecapURL}" target="_blank" rel="noopener" class="detail-yt-secondary-btn" title="Watch 10-minute game recap">
+                🎬 Game Recap
+              </a>
+              <a href="${ytPlaysURL}" target="_blank" rel="noopener" class="detail-yt-secondary-btn" title="Watch top plays & dunks">
+                🔥 Top Plays
+              </a>
+            </div>
+          </div>
+        </div>
+
+        <div class="yt-keyword-footer">
+          <span class="yt-kw-label">🔍 YouTube Search Keyword:</span>
+          <code class="yt-kw-code" id="modal-yt-keyword">${ytQuery}</code>
+          <button type="button" class="btn-copy-keyword" data-copy="${ytQuery}" title="Copy search query to clipboard">
+            📋 Copy Keyword
+          </button>
+        </div>
+      </div>
+    </div>
+  `;
+}
+
+function renderModalPreviewBanner(awayFullName, homeFullName, eventDate, summary) {
+  // Strictly formatted: "Team vs Team" + "Date Today" + "Preview"
+  const ytPreviewQuery = getYouTubeSearchQuery(awayFullName, homeFullName, eventDate, true);
+  const ytPreviewURL = `https://www.youtube.com/results?search_query=${encodeURIComponent(ytPreviewQuery)}`;
+  const ytAnalysisURL = `https://www.youtube.com/results?search_query=${encodeURIComponent(awayFullName + ' vs ' + homeFullName + ' Pregame Tactical Analysis')}`;
+  const ytOddsURL = `https://www.youtube.com/results?search_query=${encodeURIComponent(awayFullName + ' vs ' + homeFullName + ' Prediction and Betting Lines')}`;
+
+  const gameTimePH = formatGameTime(eventDate);
+  const predictor = summary?.predictor;
+  let predictorHTML = '';
+
+  if (predictor && predictor.homeTeam && predictor.awayTeam) {
+    const homeProb = parseFloat(predictor.homeTeam.gameProjection) || 50;
+    const awayProb = parseFloat(predictor.awayTeam.gameProjection) || 50;
+    predictorHTML = `
+      <div class="modal-predictor-card">
+        <div class="predictor-header">
+          <span class="predictor-title">🎯 ESPN Matchup Predictor</span>
+          <span class="predictor-sub">Projected Win Probability</span>
+        </div>
+        <div class="predictor-bar-wrap">
+          <div class="predictor-bar-half left" style="width: ${awayProb}%;">
+            <span class="pred-text">${awayProb}%</span>
+          </div>
+          <div class="predictor-bar-half right" style="width: ${homeProb}%;">
+            <span class="pred-text">${homeProb}%</span>
+          </div>
+        </div>
+        <div class="predictor-teams-row">
+          <span class="pred-team-name">${awayFullName}</span>
+          <span class="pred-team-name">${homeFullName}</span>
+        </div>
+      </div>
+    `;
+  }
+
+  return `
+    <div class="detail-preview-banner">
+      <div class="detail-preview-hero-card">
+        <div class="preview-hero-glow"></div>
+        <div class="preview-hero-header">
+          <div class="preview-badge">
+            <span class="preview-badge-icon">📅</span>
+            <span class="preview-badge-text">UPCOMING MATCHUP PREVIEW</span>
+          </div>
+          <span class="preview-tipoff-pill">⏰ Tip-off: ${gameTimePH} (PH Time)</span>
+        </div>
+
+        <div class="preview-hero-body">
+          <h4 class="preview-hero-title">${awayFullName} vs ${homeFullName} Matchup Preview</h4>
+          <p class="preview-hero-subtitle">Game is scheduled and has not started yet. Explore pregame breakdowns, tactical scouting reports, and key predictions on YouTube.</p>
+
+          ${predictorHTML}
+
+          <div class="preview-cta-group">
+            <a href="${ytPreviewURL}" target="_blank" rel="noopener" class="detail-preview-primary-btn" title="Watch pregame analysis & preview on YouTube">
+              <span class="yt-play-triangle">▶</span> Watch Game Preview & Analysis on YouTube
+            </a>
+            <div class="yt-sub-actions">
+              <a href="${ytAnalysisURL}" target="_blank" rel="noopener" class="detail-yt-secondary-btn" title="Pregame breakdown">
+                🎙️ Tactical Breakdown
+              </a>
+              <a href="${ytOddsURL}" target="_blank" rel="noopener" class="detail-yt-secondary-btn" title="Matchup predictions">
+                🎯 Predictions & Lines
+              </a>
+            </div>
+          </div>
+        </div>
+
+        <div class="yt-keyword-footer preview-kw-footer">
+          <span class="yt-kw-label">🔍 YouTube Search Keyword:</span>
+          <code class="yt-kw-code" id="modal-yt-keyword">${ytPreviewQuery}</code>
+          <button type="button" class="btn-copy-keyword" data-copy="${ytPreviewQuery}" title="Copy search query to clipboard">
+            📋 Copy Keyword
+          </button>
+        </div>
+      </div>
+    </div>
+  `;
+}
+
+function renderModalLiveBanner(awayName, homeName, eventId, competition) {
+  const broadcasts = competition?.broadcasts || [];
+  const broadcastNames = broadcasts.flatMap(b => b.names || []).filter(Boolean);
+  const broadcastDisplay = broadcastNames.length > 0 ? broadcastNames.join(', ') : 'NBA TV / League Pass';
+
+  return `
+    <div class="detail-section detail-stream-section">
+      <div class="detail-stream-header">
+        <div class="detail-stream-title-group">
+          <span class="detail-stream-live-badge"><span class="live-dot-pulse"></span> LIVE BROADCAST</span>
+          <span class="detail-broadcast-network" id="detail-broadcast-network">📺 ${broadcastDisplay}</span>
+          <span class="detail-quality-tag" id="detail-quality-tag">Matching live feeds...</span>
+        </div>
+        <div class="detail-stream-controls-top">
+          <div class="detail-stream-server-wrap">
+            <div class="detail-server-header-row">
+              <label class="detail-server-label">
+                <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M4.9 19.1C1 15.2 1 8.8 4.9 4.9"/><path d="M7.8 16.2c-2.3-2.3-2.3-6.1 0-8.5"/><circle cx="12" cy="12" r="2"/><path d="M16.2 7.8c2.3 2.3 2.3 6.1 0 8.5"/><path d="M19.1 4.9C23 8.8 23 15.2 19.1 19.1"/></svg>
+                <span>Stream Source / Server:</span>
+              </label>
+
+              <!-- TV-Friendly Custom Dropdown Selector for Game Broadcast -->
+              <div class="tv-custom-select-wrap modal-custom-select-wrap" id="detail-custom-select-wrap">
+                <button type="button" class="tv-custom-select-trigger detail-select-trigger" id="detail-select-trigger" aria-haspopup="listbox" aria-expanded="false" tabindex="0">
+                  <span class="tv-select-trigger-content">
+                    <span class="tv-select-icon">📡</span>
+                    <span class="tv-select-label" id="detail-select-label">Searching feeds...</span>
+                  </span>
+                  <span class="tv-select-chevron">
+                    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><polyline points="6 9 12 15 18 9"/></svg>
+                  </span>
+                </button>
+                <div class="tv-custom-dropdown-menu hidden" id="detail-dropdown-menu" role="listbox">
+                  <div class="tv-dropdown-loading">Searching live streams from GitHub repo...</div>
+                </div>
+              </div>
+            </div>
+
+            <!-- Quick TV Server Switcher Pills (Instant 1-Click for TV Remotes) -->
+            <div class="tv-server-pills-bar modal-pills-bar" id="detail-server-pills" role="radiogroup" aria-label="Game Stream Server">
+              <div class="modal-pills-loading">Searching live streams from GitHub repo...</div>
+            </div>
+
+            <!-- Native select visually hidden via sr-only-select, kept synced for backwards compatibility -->
+            <select id="detail-stream-server" class="detail-server-select sr-only-select" data-event-id="${eventId}" tabindex="-1" aria-hidden="true">
+              <option value="">Searching live streams from GitHub repo...</option>
+            </select>
+          </div>
+        </div>
+      </div>
+
+      <div class="detail-player-wrapper" id="detail-player-wrapper">
+        <div class="detail-video-container">
+          <video id="detail-game-video" class="detail-game-video" playsinline controls preload="auto"></video>
+          <div id="detail-video-overlay" class="detail-video-overlay hidden">
+            <div class="overlay-spinner"></div>
+            <p id="detail-overlay-msg" class="overlay-message">Connecting to ${awayName} vs ${homeName} live broadcast feed...</p>
+            <button id="detail-overlay-retry" class="tv-btn tv-btn-primary hidden">Retry Stream</button>
+          </div>
+        </div>
+        <div class="detail-player-bottom-bar">
+          <div class="detail-player-status">
+            <span class="stream-status-pill online" id="detail-status-pill">
+              <span class="status-dot"></span>
+              <span id="detail-status-text">Connected</span>
+            </span>
+            <span class="detail-stream-desc" id="detail-stream-desc">doms9/iptv Live Events</span>
+          </div>
+          <div class="detail-player-actions">
+            <button id="detail-fullscreen-btn" class="detail-action-btn" title="Fullscreen mode (Smart TV & Desktop)">
+              <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M8 3H5a2 2 0 0 0-2 2v3m18 0V5a2 2 0 0 0-2-2h-3m0 18h3a2 2 0 0 0 2-2v-3M3 16v3a2 2 0 0 0 2 2h3"/></svg>
+              <span>Fullscreen</span>
+            </button>
+            <button id="detail-copy-stream-btn" class="detail-action-btn" title="Copy direct .m3u8 stream link for VLC or Smart TV">
+              <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="9" y="9" width="13" height="13" rx="2" ry="2"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/></svg>
+              <span>Copy .m3u8</span>
+            </button>
+          </div>
+        </div>
+      </div>
     </div>
   `;
 }
 
 function renderGameDetail(summary, eventId) {
   if (!summary) {
-    return `<div class="detail-error">Failed to load game details. Please try again.</div>`;
+    return `<div class="detail-error">Failed to load game details. Please check your connection and try again.</div>`;
   }
 
   const header = summary.header;
   const boxScore = summary.boxscore;
   const gameInfo = summary.gameInfo;
+  const leaders = summary.leaders || [];
+  const article = summary.article;
+  const seasonSeries = summary.seasonseries && summary.seasonseries.length > 0 ? summary.seasonseries[0] : null;
 
   // Get competitors from header
   const competition = header?.competitions?.[0];
@@ -2005,86 +2338,184 @@ function renderGameDetail(summary, eventId) {
 
   const awayTeam = away.team || {};
   const homeTeam = home.team || {};
-  const awayLogo = awayTeam.logo || awayTeam.logos?.[0]?.href || '';
-  const homeLogo = homeTeam.logo || homeTeam.logos?.[0]?.href || '';
+  const awayLogo = awayTeam.logo || awayTeam.logos?.[0]?.href || getTeamLogo(away);
+  const homeLogo = homeTeam.logo || homeTeam.logos?.[0]?.href || getTeamLogo(home);
   const awayName = awayTeam.shortDisplayName || awayTeam.displayName || 'Away';
   const homeName = homeTeam.shortDisplayName || homeTeam.displayName || 'Home';
   const awayFullName = awayTeam.displayName || awayName;
   const homeFullName = homeTeam.displayName || homeName;
-  const awayAbbr = awayTeam.abbreviation || '???';
-  const homeAbbr = homeTeam.abbreviation || '???';
+  const awayAbbr = awayTeam.abbreviation || 'CLE';
+  const homeAbbr = homeTeam.abbreviation || 'PHI';
   const awayScore = away.score || '—';
   const homeScore = home.score || '—';
   const awayRecord = away.record?.[0]?.displayValue || '';
   const homeRecord = home.record?.[0]?.displayValue || '';
-  const awayColor = TEAM_COLORS[awayAbbr] || '#1a2e44';
-  const homeColor = TEAM_COLORS[homeAbbr] || '#1a2e44';
+  const awayColor = TEAM_COLORS[awayAbbr] || '#860038';
+  const homeColor = TEAM_COLORS[homeAbbr] || '#006bb6';
 
   // Game status
   const gameState = header?.competitions?.[0]?.status?.type?.state || 'pre';
   const isLive = gameState === 'in';
   const isFinal = gameState === 'post';
   const isScheduled = gameState === 'pre';
-  const statusText = header?.competitions?.[0]?.status?.type?.shortDetail || header?.competitions?.[0]?.status?.type?.detail || '';
+  const statusDetail = header?.competitions?.[0]?.status?.type?.detail || '';
+  const statusShort = header?.competitions?.[0]?.status?.type?.shortDetail || statusDetail || '';
+  const eventDate = competition?.date || header?.date || new Date().toISOString();
 
-  // Line scores (quarter/half scores)
-  const awayLineScores = away.linescores || [];
-  const homeLineScores = home.linescores || [];
+  // Determine winner
+  const numAwayScore = parseInt(awayScore) || 0;
+  const numHomeScore = parseInt(homeScore) || 0;
+  const awayWon = isFinal && numAwayScore > numHomeScore;
+  const homeWon = isFinal && numHomeScore > numAwayScore;
 
-  // Build scoreboard header
-  let scoreboardHTML = `
-    <div class="detail-scoreboard" style="background: linear-gradient(135deg, ${awayColor}cc, ${homeColor}cc);">
-      <div class="detail-team-side">
-        <img src="${awayLogo}" class="detail-team-logo" alt="${awayAbbr}" />
-        <div class="detail-team-info">
-          <span class="detail-team-name">${awayName}</span>
-          ${awayRecord ? `<span class="detail-team-record">${awayRecord}</span>` : ''}
+  // Broadcaster
+  const broadcasts = competition?.broadcasts || [];
+  const broadcastNames = broadcasts.flatMap(b => b.names || []).filter(Boolean);
+  const broadcastDisplay = broadcastNames.length > 0 ? broadcastNames.join(', ') : 'NBA TV / League Pass';
+
+  // Season & Stage Note
+  let seasonNote = 'NBA Regular Season';
+  if (header?.season?.type === 1) seasonNote = 'Preseason';
+  else if (header?.season?.type === 3) seasonNote = 'NBA Playoffs';
+  if (competition?.notes && competition.notes.length > 0) {
+    seasonNote = competition.notes[0].headline || seasonNote;
+  }
+
+  // Venue & Date Display
+  const venue = gameInfo?.venue;
+  const venueDisplay = venue ? `${venue.fullName || venue.shortName || 'NBA Arena'}${venue.address?.city ? ', ' + venue.address.city : ''}` : 'NBA Arena';
+  const formattedGameDate = formatYouTubeDate(eventDate);
+
+  // Scoreboard Header
+  const scoreboardHTML = `
+    <div class="detail-scoreboard" style="background: linear-gradient(135deg, ${awayColor}38 0%, #0a0f1d 50%, ${homeColor}38 100%);">
+      <div class="detail-scoreboard-meta-bar">
+        <div class="meta-bar-left">
+          <span class="meta-badge broadcast">📺 ${broadcastDisplay}</span>
+          <span class="meta-badge season">${seasonNote}</span>
+          ${seasonSeries?.summary ? `<span class="meta-badge series">⚔️ ${seasonSeries.summary}</span>` : ''}
         </div>
-        <span class="detail-team-score">${awayScore}</span>
-      </div>
-      <div class="detail-vs">
-        <span class="detail-status-text ${isLive ? 'live' : ''}">${statusText}</span>
-      </div>
-      <div class="detail-team-side">
-        <span class="detail-team-score">${homeScore}</span>
-        <div class="detail-team-info" style="text-align:right;">
-          <span class="detail-team-name">${homeName}</span>
-          ${homeRecord ? `<span class="detail-team-record">${homeRecord}</span>` : ''}
+        <div class="meta-bar-right">
+          <span class="meta-badge venue" title="${venueDisplay}">📍 ${venueDisplay}</span>
+          <span class="meta-badge date">📅 ${formattedGameDate}</span>
         </div>
-        <img src="${homeLogo}" class="detail-team-logo" alt="${homeAbbr}" />
+      </div>
+
+      <div class="detail-matchup-arena">
+        <!-- Away Team -->
+        <div class="detail-team-arena-card away ${awayWon ? 'is-winner' : ''}">
+          <div class="detail-team-logo-wrap">
+            <img src="${awayLogo}" class="detail-team-logo" alt="${awayAbbr}" />
+            ${awayWon ? '<span class="detail-winner-trophy" title="Game Winner">🏆</span>' : ''}
+          </div>
+          <div class="detail-team-text">
+            <span class="detail-team-full-name">${awayFullName}</span>
+            <div class="detail-team-sub-row">
+              <span class="detail-team-abbr-pill" style="border-color:${awayColor}; color:${awayColor};">${awayAbbr}</span>
+              ${awayRecord ? `<span class="detail-record-pill">(${awayRecord})</span>` : ''}
+              ${awayWon ? `<span class="detail-winner-text">WINNER</span>` : ''}
+            </div>
+          </div>
+          <div class="detail-score-box ${awayWon ? 'winner-score' : ''}">
+            ${awayScore}
+          </div>
+        </div>
+
+        <!-- Center Status Node -->
+        <div class="detail-status-center-node">
+          ${isLive ? `
+            <div class="detail-hub-live">
+              <span class="live-dot-pulse"></span>
+              <span class="hub-live-text">${statusShort || 'LIVE'}</span>
+              <span class="hub-sub-note">In Progress</span>
+            </div>
+          ` : (isFinal ? `
+            <div class="detail-hub-final">
+              <span class="hub-final-tag">FINAL</span>
+              <span class="hub-final-sub">${statusShort !== 'Final' ? statusShort : 'Official Score'}</span>
+            </div>
+          ` : `
+            <div class="detail-hub-scheduled">
+              <span class="hub-time-tag">⏰ ${formatGameTime(eventDate)}</span>
+              <span class="hub-scheduled-sub">Philippine Time</span>
+            </div>
+          `)}
+        </div>
+
+        <!-- Home Team -->
+        <div class="detail-team-arena-card home ${homeWon ? 'is-winner' : ''}">
+          <div class="detail-score-box ${homeWon ? 'winner-score' : ''}">
+            ${homeScore}
+          </div>
+          <div class="detail-team-text align-right">
+            <span class="detail-team-full-name">${homeFullName}</span>
+            <div class="detail-team-sub-row justify-end">
+              ${homeWon ? `<span class="detail-winner-text">WINNER</span>` : ''}
+              ${homeRecord ? `<span class="detail-record-pill">(${homeRecord})</span>` : ''}
+              <span class="detail-team-abbr-pill" style="border-color:${homeColor}; color:${homeColor};">${homeAbbr}</span>
+            </div>
+          </div>
+          <div class="detail-team-logo-wrap">
+            <img src="${homeLogo}" class="detail-team-logo" alt="${homeAbbr}" />
+            ${homeWon ? '<span class="detail-winner-trophy" title="Game Winner">🏆</span>' : ''}
+          </div>
+        </div>
       </div>
     </div>
   `;
 
-  // Quarter scores table
-  let quarterHTML = '';
+  // Quarter-by-Quarter Linescore Strip
+  let linescoreHTML = '';
+  const awayLineScores = away.linescores || [];
+  const homeLineScores = home.linescores || [];
+
   if (awayLineScores.length > 0 || homeLineScores.length > 0) {
     const numPeriods = Math.max(awayLineScores.length, homeLineScores.length);
     let periodHeaders = '';
     let awayPeriodScores = '';
     let homePeriodScores = '';
+
     for (let i = 0; i < numPeriods; i++) {
-      const label = i < 4 ? `Q${i + 1}` : `OT${i - 3}`;
+      const label = i < 4 ? `Q${i + 1}` : (i === 4 ? 'OT' : `OT${i - 3}`);
+      const aVal = awayLineScores[i]?.displayValue ?? awayLineScores[i]?.value ?? '-';
+      const hVal = homeLineScores[i]?.displayValue ?? homeLineScores[i]?.value ?? '-';
+
+      const numA = parseInt(aVal) || 0;
+      const numH = parseInt(hVal) || 0;
+      const aHi = numA > numH ? 'q-high' : '';
+      const hHi = numH > numA ? 'q-high' : '';
+
       periodHeaders += `<th>${label}</th>`;
-      awayPeriodScores += `<td>${awayLineScores[i]?.displayValue || awayLineScores[i]?.value || '-'}</td>`;
-      homePeriodScores += `<td>${homeLineScores[i]?.displayValue || homeLineScores[i]?.value || '-'}</td>`;
+      awayPeriodScores += `<td class="${aHi}">${aVal}</td>`;
+      homePeriodScores += `<td class="${hHi}">${hVal}</td>`;
     }
-    quarterHTML = `
-      <div class="detail-section">
-        <table class="quarter-scores-table">
+
+    linescoreHTML = `
+      <div class="detail-linescore-wrapper">
+        <table class="detail-linescore-table">
           <thead>
-            <tr><th></th>${periodHeaders}<th>T</th></tr>
+            <tr>
+              <th class="col-team">TEAM</th>
+              ${periodHeaders}
+              <th class="col-total">T</th>
+            </tr>
           </thead>
           <tbody>
-            <tr>
-              <td class="quarter-team"><img src="${awayLogo}" class="quarter-team-logo" />${awayAbbr}</td>
+            <tr class="${awayWon ? 'winner-row' : ''}">
+              <td class="col-team-name">
+                <img src="${awayLogo}" class="linescore-logo" alt="${awayAbbr}" />
+                <span class="linescore-abbr">${awayAbbr}</span>
+              </td>
               ${awayPeriodScores}
-              <td class="quarter-total">${awayScore}</td>
+              <td class="col-total score-total">${awayScore}</td>
             </tr>
-            <tr>
-              <td class="quarter-team"><img src="${homeLogo}" class="quarter-team-logo" />${homeAbbr}</td>
+            <tr class="${homeWon ? 'winner-row' : ''}">
+              <td class="col-team-name">
+                <img src="${homeLogo}" class="linescore-logo" alt="${homeAbbr}" />
+                <span class="linescore-abbr">${homeAbbr}</span>
+              </td>
               ${homePeriodScores}
-              <td class="quarter-total">${homeScore}</td>
+              <td class="col-total score-total">${homeScore}</td>
             </tr>
           </tbody>
         </table>
@@ -2092,69 +2523,27 @@ function renderGameDetail(summary, eventId) {
     `;
   }
 
-  // Video / highlights / live stream section
-  let videoHTML = '';
-
+  // Smart Status Showcase (Finished Highlights vs Live Player vs Scheduled Preview)
+  let statusBannerHTML = '';
   if (isLive) {
-    // Live stream link
-    const awaySlug = slugifyTeamName(awayFullName);
-    const homeSlug = slugifyTeamName(homeFullName);
-    const streamURL = buildStreamFreeURL(awaySlug, homeSlug);
-    videoHTML = `
-      <div class="detail-section">
-        <h3 class="detail-section-title">🔴 Live Stream</h3>
-        <div class="detail-video-section">
-          <a href="${streamURL}" target="_blank" rel="noopener"
-             class="detail-live-btn" id="detail-live-btn"
-             data-away-slug="${awaySlug}" data-home-slug="${homeSlug}">
-            <span class="live-pulse-dot"></span>
-            📺 Watch Live Stream
-          </a>
-          <p class="detail-video-note">Stream opens in a new tab on StreamFree</p>
-        </div>
-      </div>
-    `;
+    statusBannerHTML = renderModalLiveBanner(awayName, homeName, eventId, competition);
   } else if (isFinal) {
-    // YouTube highlights search
-    const d = new Date(header?.competitions?.[0]?.date || Date.now());
-    const month = d.toLocaleString('en-US', { month: 'long' });
-    const day = d.getDate();
-    const year = d.getFullYear();
-    const ytQuery = `${awayFullName} vs ${homeFullName} Full Game Highlights ${month} ${day} ${year} NBA`;
-    const ytURL = `https://www.youtube.com/results?search_query=${encodeURIComponent(ytQuery)}`;
-
-    videoHTML = `
-      <div class="detail-section">
-        <h3 class="detail-section-title">🎬 Game Highlights</h3>
-        <div class="detail-video-section">
-          <a href="${ytURL}" target="_blank" rel="noopener" class="detail-highlights-btn">
-            ▶ Watch Full Game Highlights on YouTube
-          </a>
-          <p class="detail-video-note">Opens YouTube search for this game's highlights</p>
-        </div>
-      </div>
-    `;
+    statusBannerHTML = renderModalHighlightsBanner(awayFullName, homeFullName, eventDate);
   } else {
-    // Scheduled — show preview
-    const gameTime = formatGameTime(header?.competitions?.[0]?.date || '');
-    videoHTML = `
-      <div class="detail-section">
-        <h3 class="detail-section-title">📅 Game Preview</h3>
-        <div class="detail-video-section">
-          <p class="detail-scheduled-msg">Game starts at <strong>${gameTime}</strong></p>
-          <p class="detail-video-note">Live stream link will be available once the game begins</p>
-        </div>
-      </div>
-    `;
+    statusBannerHTML = renderModalPreviewBanner(awayFullName, homeFullName, eventDate, summary);
   }
 
-  // Team comparison stats
-  const comparisonHTML = (!isScheduled && boxScore) ? renderTeamComparisonStats(boxScore) : '';
+  // Leaders Spotlight
+  const leadersHTML = renderModalGameLeaders(leaders, awayAbbr, homeAbbr, awayColor, homeColor);
 
-  // Player stats (box score)
+  // Full 13 Team Comparison Stats
+  const teamComparisonHTML = (!isScheduled && boxScore)
+    ? renderTeamComparisonStats(boxScore, awayFullName, homeFullName, awayColor, homeColor, awayLogo, homeLogo)
+    : '';
+
+  // Box Score Player Tables
   let playerStatsHTML = '';
   if (!isScheduled && boxScore && boxScore.players && boxScore.players.length >= 2) {
-    // Determine which index is away / home
     const p0Team = boxScore.players[0]?.team?.displayName || '';
     const isP0Away = p0Team === awayFullName || boxScore.players[0]?.team?.abbreviation === awayAbbr;
     const awayIdx = isP0Away ? 0 : 1;
@@ -2164,71 +2553,260 @@ function renderGameDetail(summary, eventId) {
     const homePlayerData = getPlayerStats(boxScore, homeIdx);
 
     playerStatsHTML = `
-      <div class="detail-section">
-        <h3 class="detail-section-title">📊 Box Score</h3>
-        ${renderPlayerStatsTable(awayPlayerData, awayFullName, awayColor)}
-        ${renderPlayerStatsTable(homePlayerData, homeFullName, homeColor)}
+      <div class="boxscore-section-wrap">
+        <div class="boxscore-toolbar">
+          <div class="boxscore-team-filters">
+            <button class="boxscore-team-pill active" data-team-filter="all">🏀 Both Teams</button>
+            <button class="boxscore-team-pill" data-team-filter="${awayAbbr}">${awayAbbr}</button>
+            <button class="boxscore-team-pill" data-team-filter="${homeAbbr}">${homeAbbr}</button>
+          </div>
+          <span class="boxscore-hint">💡 Highlights 20+ PTS in gold, 30+ PTS with 👑</span>
+        </div>
+        ${renderPlayerStatsTable(awayPlayerData, awayFullName, awayColor, awayLogo)}
+        ${renderPlayerStatsTable(homePlayerData, homeFullName, homeColor, homeLogo)}
+      </div>
+    `;
+  } else {
+    playerStatsHTML = `<div class="detail-no-data">Player box score statistics will become available once the game gets underway.</div>`;
+  }
+
+  // Game Info & Story Article
+  let gameStoryHTML = '';
+  if (article && (article.headline || article.description)) {
+    gameStoryHTML = `
+      <div class="modal-story-card">
+        <div class="story-badge">📰 ESPN GAME RECAP STORY</div>
+        <h4 class="story-headline">${article.headline || 'Game Recap'}</h4>
+        <p class="story-body">${article.description || ''}</p>
       </div>
     `;
   }
 
-  // Game info (venue, attendance, officials)
-  let gameInfoHTML = '';
+  let gameInfoGridHTML = '';
   if (gameInfo) {
     const venue = gameInfo.venue;
     const attendance = gameInfo.attendance;
     const officials = gameInfo.officials || [];
-    let infoItems = '';
+    let items = '';
+
     if (venue) {
-      infoItems += `<div class="detail-info-item"><span class="info-label">Arena</span><span class="info-value">${venue.fullName || venue.shortName || 'N/A'}${venue.address?.city ? `, ${venue.address.city}` : ''}</span></div>`;
+      items += `
+        <div class="game-info-cell">
+          <span class="info-icon">🏟️</span>
+          <div class="info-text">
+            <span class="cell-label">Arena / Venue</span>
+            <span class="cell-val">${venue.fullName || venue.shortName || 'N/A'}${venue.address?.city ? ', ' + venue.address.city : ''}</span>
+          </div>
+        </div>
+      `;
     }
     if (attendance) {
-      infoItems += `<div class="detail-info-item"><span class="info-label">Attendance</span><span class="info-value">${Number(attendance).toLocaleString()}</span></div>`;
+      items += `
+        <div class="game-info-cell">
+          <span class="info-icon">👥</span>
+          <div class="info-text">
+            <span class="cell-label">Official Attendance</span>
+            <span class="cell-val">${Number(attendance).toLocaleString()} fans</span>
+          </div>
+        </div>
+      `;
+    }
+    if (seasonSeries?.summary) {
+      items += `
+        <div class="game-info-cell">
+          <span class="info-icon">⚔️</span>
+          <div class="info-text">
+            <span class="cell-label">Season Series</span>
+            <span class="cell-val">${seasonSeries.summary}</span>
+          </div>
+        </div>
+      `;
     }
     if (officials.length > 0) {
       const offNames = officials.map(o => o.displayName || o.fullName || '').filter(Boolean).join(', ');
       if (offNames) {
-        infoItems += `<div class="detail-info-item"><span class="info-label">Officials</span><span class="info-value">${offNames}</span></div>`;
+        items += `
+          <div class="game-info-cell col-span-2">
+            <span class="info-icon">⚖️</span>
+            <div class="info-text">
+              <span class="cell-label">Game Referees / Officials</span>
+              <span class="cell-val">${offNames}</span>
+            </div>
+          </div>
+        `;
       }
     }
-    if (infoItems) {
-      gameInfoHTML = `
-        <div class="detail-section">
-          <h3 class="detail-section-title">ℹ️ Game Info</h3>
-          <div class="detail-info-grid">${infoItems}</div>
+    if (items) {
+      gameInfoGridHTML = `
+        <div class="modal-info-grid">
+          ${items}
         </div>
       `;
     }
   }
 
+  // Overview Tab Composite
+  const overviewStorySnippet = article?.headline ? `
+    <div class="overview-story-teaser">
+      <div class="teaser-icon">📰</div>
+      <div class="teaser-content">
+        <span class="teaser-title">${article.headline}</span>
+        <button type="button" class="btn-jump-story">Read Story & Details →</button>
+      </div>
+    </div>
+  ` : '';
+
+  // Segmented Modal Navigation Bar
+  const navTabsHTML = `
+    <div class="modal-tabs-bar">
+      <button class="modal-tab-btn active" data-modal-tab="overview">
+        <span class="tab-icon">⚡</span> Overview
+      </button>
+      <button class="modal-tab-btn" data-modal-tab="boxscore">
+        <span class="tab-icon">📊</span> Box Score
+      </button>
+      <button class="modal-tab-btn" data-modal-tab="teamstats">
+        <span class="tab-icon">📈</span> Team Comparison
+      </button>
+      <button class="modal-tab-btn" data-modal-tab="gameinfo">
+        <span class="tab-icon">ℹ️</span> Game Info & Story
+      </button>
+    </div>
+  `;
+
   return `
-    ${scoreboardHTML}
-    ${quarterHTML}
-    ${videoHTML}
-    ${comparisonHTML}
-    ${playerStatsHTML}
-    ${gameInfoHTML}
+    <div class="modal-broadcast-shell">
+      ${scoreboardHTML}
+      ${linescoreHTML}
+      ${statusBannerHTML}
+      ${navTabsHTML}
+
+      <div class="modal-tab-panes-wrap">
+        <!-- Pane 1: Overview -->
+        <div class="modal-tab-pane active" id="modal-pane-overview">
+          ${overviewStorySnippet}
+          ${leadersHTML}
+          ${teamComparisonHTML}
+        </div>
+
+        <!-- Pane 2: Box Score -->
+        <div class="modal-tab-pane" id="modal-pane-boxscore">
+          ${playerStatsHTML}
+        </div>
+
+        <!-- Pane 3: Team Comparison -->
+        <div class="modal-tab-pane" id="modal-pane-teamstats">
+          ${teamComparisonHTML || '<div class="detail-no-data">Team stats comparison will update once the game starts.</div>'}
+        </div>
+
+        <!-- Pane 4: Game Info & Story -->
+        <div class="modal-tab-pane" id="modal-pane-gameinfo">
+          ${gameStoryHTML}
+          ${gameInfoGridHTML}
+        </div>
+      </div>
+    </div>
   `;
 }
 
-function openGameDetail(eventId) {
+function initModalInteractions(modalContent, summary, eventId) {
+  if (!modalContent) return;
+
+  // 1. Modal tab navigation
+  const tabBtns = modalContent.querySelectorAll('.modal-tab-btn');
+  const tabPanes = modalContent.querySelectorAll('.modal-tab-pane');
+
+  tabBtns.forEach(btn => {
+    btn.addEventListener('click', () => {
+      const target = btn.getAttribute('data-modal-tab');
+      tabBtns.forEach(b => b.classList.remove('active'));
+      tabPanes.forEach(p => p.classList.remove('active'));
+
+      btn.classList.add('active');
+      const targetPane = modalContent.querySelector(`#modal-pane-${target}`);
+      if (targetPane) targetPane.classList.add('active');
+    });
+  });
+
+  // 2. Boxscore team filter pills
+  const boxscorePills = modalContent.querySelectorAll('.boxscore-team-pill');
+  boxscorePills.forEach(pill => {
+    pill.addEventListener('click', () => {
+      boxscorePills.forEach(p => p.classList.remove('active'));
+      pill.classList.add('active');
+      const teamFilter = pill.getAttribute('data-team-filter');
+      const blocks = modalContent.querySelectorAll('.detail-team-stats-block');
+
+      blocks.forEach(block => {
+        const teamKey = block.getAttribute('data-team');
+        if (teamFilter === 'all' || teamFilter === teamKey) {
+          block.style.display = 'block';
+        } else {
+          block.style.display = 'none';
+        }
+      });
+    });
+  });
+
+  // 3. Copy search keyword buttons
+  modalContent.querySelectorAll('.btn-copy-keyword').forEach(copyBtn => {
+    copyBtn.addEventListener('click', async () => {
+      const textToCopy = copyBtn.getAttribute('data-copy') || '';
+      if (!textToCopy) return;
+
+      try {
+        if (navigator.clipboard && navigator.clipboard.writeText) {
+          await navigator.clipboard.writeText(textToCopy);
+        } else {
+          const ta = document.createElement('textarea');
+          ta.value = textToCopy;
+          ta.style.position = 'fixed';
+          ta.style.opacity = '0';
+          document.body.appendChild(ta);
+          ta.select();
+          document.execCommand('copy');
+          document.body.removeChild(ta);
+        }
+        const originalText = copyBtn.textContent;
+        copyBtn.textContent = '✓ Copied!';
+        copyBtn.classList.add('copied');
+        setTimeout(() => {
+          copyBtn.textContent = originalText;
+          copyBtn.classList.remove('copied');
+        }, 2000);
+      } catch (err) {
+        console.warn('Failed to copy keyword:', err);
+      }
+    });
+  });
+
+  // 4. Read Full Recap jumper
+  const readRecapBtn = modalContent.querySelector('.btn-jump-story');
+  if (readRecapBtn) {
+    readRecapBtn.addEventListener('click', () => {
+      const infoTabBtn = modalContent.querySelector('.modal-tab-btn[data-modal-tab="gameinfo"]');
+      if (infoTabBtn) infoTabBtn.click();
+    });
+  }
+}
+
+function openGameDetail(eventId, autoPlayStream = false) {
   const modal = document.getElementById('game-detail-modal');
+  const panel = modal?.querySelector('.game-detail-panel');
   const content = document.getElementById('game-detail-content');
+  if (panel) panel.scrollTop = 0;
   modal.classList.remove('hidden');
   document.body.style.overflow = 'hidden';
   content.innerHTML = '<div class="loading">Loading game details...</div>';
 
   fetchGameSummary(eventId).then(summary => {
     content.innerHTML = renderGameDetail(summary, eventId);
+    initModalInteractions(content, summary, eventId);
+    if (panel) panel.scrollTop = 0;
 
-    // If live, resolve the stream link
-    const liveBtn = document.getElementById('detail-live-btn');
-    if (liveBtn) {
-      const awaySlug = liveBtn.getAttribute('data-away-slug');
-      const homeSlug = liveBtn.getAttribute('data-home-slug');
-      resolveStreamLink(awaySlug, homeSlug).then(url => {
-        liveBtn.href = url;
-      });
+    const isLive = summary?.header?.competitions?.[0]?.status?.type?.state === 'in';
+    if (isLive) {
+      initDetailGamePlayer(eventId, autoPlayStream, summary);
     }
   });
 }
@@ -2237,6 +2815,529 @@ function closeGameDetail() {
   const modal = document.getElementById('game-detail-modal');
   modal.classList.add('hidden');
   document.body.style.overflow = '';
+  destroyDetailGamePlayer();
+}
+
+// ===== IN-MODAL LIVE GAME STREAM CONTROLLER (DOMS9/IPTV REPO) =====
+
+let detailGameHls = null;
+let detailActiveServers = [];
+let currentDetailServerObj = null;
+
+function destroyDetailGamePlayer() {
+  if (detailGameHls) {
+    try {
+      detailGameHls.stopLoad();
+      detailGameHls.detachMedia();
+      detailGameHls.destroy();
+    } catch (e) {}
+    detailGameHls = null;
+  }
+  const video = document.getElementById('detail-game-video');
+  if (video) {
+    try {
+      video.pause();
+      video.removeAttribute('src');
+      video.load();
+      video.style.display = 'none';
+    } catch (e) {}
+  }
+  currentDetailServerObj = null;
+  detailActiveServers = [];
+}
+
+function updateDetailStreamStatus(status, text) {
+  const pill = document.getElementById('detail-status-pill');
+  const textEl = document.getElementById('detail-status-text');
+  if (pill) pill.className = `stream-status-pill ${status}`;
+  if (textEl) textEl.textContent = text;
+}
+
+function showDetailOverlay(msg, showRetry = false) {
+  const overlay = document.getElementById('detail-video-overlay');
+  const msgEl = document.getElementById('detail-overlay-msg');
+  const retryBtn = document.getElementById('detail-overlay-retry');
+  const spinner = overlay?.querySelector('.overlay-spinner');
+
+  if (overlay && msgEl) {
+    overlay.classList.remove('hidden');
+    msgEl.textContent = msg;
+    if (retryBtn) {
+      if (showRetry) {
+        retryBtn.classList.remove('hidden');
+        if (spinner) spinner.style.display = 'none';
+      } else {
+        retryBtn.classList.add('hidden');
+        if (spinner) spinner.style.display = 'block';
+      }
+    }
+  }
+}
+
+function hideDetailOverlay() {
+  const overlay = document.getElementById('detail-video-overlay');
+  if (overlay) overlay.classList.add('hidden');
+}
+
+function loadDetailGameStream(serverObj, autoPlay = true) {
+  if (!serverObj || !serverObj.url) return;
+  currentDetailServerObj = serverObj;
+
+  const video = document.getElementById('detail-game-video');
+  if (!video) return;
+  video.style.display = '';
+
+  const streamUrl = serverObj.url;
+  const streamReferrer = serverObj.referrer || '';
+  const serverName = serverObj.name || 'Live Game Feed';
+
+  const descEl = document.getElementById('detail-stream-desc');
+  if (descEl) descEl.textContent = `${serverName} • HLS Live`;
+
+  showDetailOverlay(`Connecting to ${serverName}...`);
+  updateDetailStreamStatus('buffering', 'Connecting...');
+
+  if (detailGameHls) {
+    detailGameHls.destroy();
+    detailGameHls = null;
+  }
+
+  // Pause 24/7 NBA TV live player so bandwidth/audio doesn't conflict
+  pauseLiveTV();
+
+  const effectiveUrl = getEffectiveStreamUrl(streamUrl, streamReferrer);
+
+  if (window.Hls && Hls.isSupported()) {
+    detailGameHls = new Hls({
+      enableWorker: true,
+      lowLatencyMode: true,
+      manifestLoadingTimeOut: 12000,
+      manifestLoadingMaxRetry: 3,
+      levelLoadingTimeOut: 12000
+    });
+
+    detailGameHls.loadSource(effectiveUrl);
+    detailGameHls.attachMedia(video);
+
+    detailGameHls.on(Hls.Events.MANIFEST_PARSED, () => {
+      hideDetailOverlay();
+      updateDetailStreamStatus('online', 'Live');
+      if (autoPlay) {
+        const modal = document.getElementById('game-detail-modal');
+        const panel = modal?.querySelector('.game-detail-panel');
+        video.play().catch(() => {});
+        if (panel && panel.scrollTop < 60) {
+          panel.scrollTop = 0;
+          requestAnimationFrame(() => { if (panel) panel.scrollTop = 0; });
+        }
+      }
+    });
+
+    detailGameHls.on(Hls.Events.ERROR, (event, data) => {
+      console.warn('Game modal HLS error:', data);
+      if (data.fatal) {
+        switch (data.type) {
+          case Hls.ErrorTypes.NETWORK_ERROR:
+            updateDetailStreamStatus('error', 'Offline / Retry');
+            showDetailOverlay('Stream connection lost. Please retry or switch to another server above.', true);
+            break;
+          case Hls.ErrorTypes.MEDIA_ERROR:
+            detailGameHls.recoverMediaError();
+            break;
+          default:
+            detailGameHls.destroy();
+            updateDetailStreamStatus('error', 'Error');
+            showDetailOverlay('Unable to play this feed. Please choose another server above.', true);
+            break;
+        }
+      }
+    });
+
+  } else if (video.canPlayType('application/vnd.apple.mpegurl')) {
+    // Native HLS (Safari, iOS, TV browsers)
+    video.src = effectiveUrl;
+    video.addEventListener('loadedmetadata', () => {
+      hideDetailOverlay();
+      updateDetailStreamStatus('online', 'Live');
+      if (autoPlay) {
+        const modal = document.getElementById('game-detail-modal');
+        const panel = modal?.querySelector('.game-detail-panel');
+        video.play().catch(() => {});
+        if (panel && panel.scrollTop < 60) {
+          panel.scrollTop = 0;
+          requestAnimationFrame(() => { if (panel) panel.scrollTop = 0; });
+        }
+      }
+    }, { once: true });
+
+    video.onerror = () => {
+      updateDetailStreamStatus('error', 'Error');
+      showDetailOverlay('Playback error. Please retry or switch server.', true);
+    };
+  } else {
+    updateDetailStreamStatus('error', 'Unsupported');
+    showDetailOverlay('HLS streaming is not supported on this browser.', false);
+  }
+}
+
+// ===== TV-FRIENDLY SERVER SELECTOR FOR GAME MODAL =====
+function setupDetailTvServerControls(eventId, servers, initialServerId) {
+  const pillsContainer = document.getElementById('detail-server-pills');
+  const dropdownMenu = document.getElementById('detail-dropdown-menu');
+  const triggerBtn = document.getElementById('detail-select-trigger');
+  const triggerLabel = document.getElementById('detail-select-label');
+  const serverSelect = document.getElementById('detail-stream-server');
+
+  let currentActiveId = initialServerId || (servers.length > 0 ? servers[0].id : 'custom');
+
+  function updateDetailActiveUI(selectedId) {
+    currentActiveId = selectedId;
+
+    // 1. Update quick TV pills
+    if (pillsContainer) {
+      pillsContainer.querySelectorAll('.tv-server-pill').forEach(pill => {
+        const sid = pill.getAttribute('data-server-id');
+        pill.classList.toggle('active', sid === selectedId);
+      });
+    }
+
+    // 2. Update custom dropdown items
+    if (dropdownMenu) {
+      dropdownMenu.querySelectorAll('.tv-dropdown-item').forEach(item => {
+        const val = item.getAttribute('data-value');
+        item.classList.toggle('active', val === selectedId);
+      });
+    }
+
+    // 3. Update trigger button label
+    if (triggerLabel) {
+      if (selectedId === 'custom') {
+        triggerLabel.textContent = '⚙ Custom Stream URL';
+      } else {
+        const found = servers.find(s => s.id === selectedId);
+        triggerLabel.textContent = found ? found.name : 'Choose Feed';
+      }
+    }
+
+    // 4. Update hidden native select
+    if (serverSelect) {
+      serverSelect.value = selectedId;
+    }
+  }
+
+  function handleServerSelection(targetId) {
+    updateDetailActiveUI(targetId);
+    if (dropdownMenu) {
+      dropdownMenu.classList.add('hidden');
+      if (triggerBtn) triggerBtn.setAttribute('aria-expanded', 'false');
+    }
+
+    if (targetId === 'custom') {
+      const savedCustom = localStorage.getItem('nba_custom_stream_url') || '';
+      const inputUrl = prompt('Enter custom HLS (.m3u8) live stream URL:', savedCustom);
+      if (inputUrl && inputUrl.trim()) {
+        const customUrl = inputUrl.trim();
+        localStorage.setItem('nba_custom_stream_url', customUrl);
+        const customServer = {
+          id: 'custom',
+          name: 'Custom Stream URL',
+          url: customUrl,
+          referrer: '',
+          quality: 'Custom'
+        };
+        loadDetailGameStream(customServer, true);
+      } else {
+        if (currentDetailServerObj) {
+          updateDetailActiveUI(currentDetailServerObj.id);
+        }
+      }
+      return;
+    }
+
+    const chosen = servers.find(s => s.id === targetId);
+    if (chosen) {
+      localStorage.setItem(`nba_game_server_${eventId}`, chosen.id);
+      loadDetailGameStream(chosen, true);
+    }
+  }
+
+  // Populate TV quick pills
+  if (pillsContainer) {
+    if (servers.length > 0) {
+      let pillsHTML = servers.map(s => `
+        <button type="button" class="tv-server-pill ${s.id === currentActiveId ? 'active' : ''}" data-server-id="${s.id}" tabindex="0" title="${s.name}">
+          <span class="server-pill-status"></span>
+          <span class="server-pill-name">${s.name}</span>
+          <span class="server-pill-badge">${s.quality || 'HD'}</span>
+        </button>
+      `).join('');
+      pillsHTML += `
+        <button type="button" class="tv-server-pill custom-pill ${currentActiveId === 'custom' ? 'active' : ''}" data-server-id="custom" tabindex="0" title="Custom M3U8 Stream URL">
+          <span class="server-pill-icon">⚙️</span>
+          <span class="server-pill-name">Custom URL</span>
+        </button>
+      `;
+      pillsContainer.innerHTML = pillsHTML;
+    } else {
+      pillsContainer.innerHTML = `
+        <div class="modal-pills-empty">
+          <span class="empty-feed-hint">No active feeds in catalog</span>
+          <button type="button" class="tv-server-pill custom-pill active" data-server-id="custom" tabindex="0">
+            <span class="server-pill-icon">⚙️</span>
+            <span class="server-pill-name">Enter Custom URL</span>
+          </button>
+        </div>
+      `;
+    }
+
+    // Attach pill clicks
+    pillsContainer.querySelectorAll('.tv-server-pill').forEach(pill => {
+      pill.addEventListener('click', (e) => {
+        e.preventDefault();
+        const sid = pill.getAttribute('data-server-id');
+        handleServerSelection(sid);
+      });
+    });
+  }
+
+  // Populate custom TV dropdown menu
+  if (dropdownMenu) {
+    if (servers.length > 0) {
+      let menuHTML = servers.map(s => `
+        <button type="button" class="tv-dropdown-item ${s.id === currentActiveId ? 'active' : ''}" data-value="${s.id}" tabindex="0">
+          <span class="dropdown-item-info">
+            <span class="dropdown-item-title">${s.name}</span>
+            <span class="dropdown-item-desc">${s.quality || 'Live Broadcast Feed'} • GitHub IPTV</span>
+          </span>
+          <span class="dropdown-item-check">✓</span>
+        </button>
+      `).join('');
+      menuHTML += `
+        <button type="button" class="tv-dropdown-item custom-opt ${currentActiveId === 'custom' ? 'active' : ''}" data-value="custom" tabindex="0">
+          <span class="dropdown-item-info">
+            <span class="dropdown-item-title">⚙️ Custom .m3u8 Stream URL...</span>
+            <span class="dropdown-item-desc">Enter any direct HLS stream URL</span>
+          </span>
+          <span class="dropdown-item-check">✓</span>
+        </button>
+      `;
+      dropdownMenu.innerHTML = menuHTML;
+    } else {
+      dropdownMenu.innerHTML = `
+        <button type="button" class="tv-dropdown-item custom-opt active" data-value="custom" tabindex="0">
+          <span class="dropdown-item-info">
+            <span class="dropdown-item-title">⚙️ Custom .m3u8 Stream URL...</span>
+            <span class="dropdown-item-desc">Enter your own live stream link</span>
+          </span>
+          <span class="dropdown-item-check">✓</span>
+        </button>
+      `;
+    }
+
+    // Attach dropdown item clicks
+    dropdownMenu.querySelectorAll('.tv-dropdown-item').forEach(item => {
+      item.addEventListener('click', (e) => {
+        e.preventDefault();
+        const sid = item.getAttribute('data-value');
+        handleServerSelection(sid);
+      });
+    });
+  }
+
+  // Toggle trigger button
+  if (triggerBtn && dropdownMenu) {
+    triggerBtn.onclick = (e) => {
+      e.preventDefault();
+      e.stopPropagation();
+      const isHidden = dropdownMenu.classList.contains('hidden');
+      document.querySelectorAll('.tv-custom-dropdown-menu').forEach(m => m.classList.add('hidden'));
+      if (isHidden) {
+        dropdownMenu.classList.remove('hidden');
+        triggerBtn.setAttribute('aria-expanded', 'true');
+        const activeOpt = dropdownMenu.querySelector('.tv-dropdown-item.active') || dropdownMenu.querySelector('.tv-dropdown-item');
+        if (activeOpt) activeOpt.focus();
+      } else {
+        dropdownMenu.classList.add('hidden');
+        triggerBtn.setAttribute('aria-expanded', 'false');
+      }
+    };
+  }
+
+  // Update initial label & selection state
+  updateDetailActiveUI(currentActiveId);
+}
+
+function initDetailGamePlayer(eventId, autoPlay = true, summary = null) {
+  const video = document.getElementById('detail-game-video');
+  if (!video) return;
+
+  const serverSelect = document.getElementById('detail-stream-server');
+  const retryBtn = document.getElementById('detail-overlay-retry');
+  const fullscreenBtn = document.getElementById('detail-fullscreen-btn');
+  const copyBtn = document.getElementById('detail-copy-stream-btn');
+  const qualityTag = document.getElementById('detail-quality-tag');
+
+  // Extract team names and abbreviations from summary
+  const competition = summary?.header?.competitions?.[0];
+  const competitors = competition?.competitors || [];
+  const away = competitors.find(c => c.homeAway === 'away') || competitors[1] || {};
+  const home = competitors.find(c => c.homeAway === 'home') || competitors[0] || {};
+  const awayTeam = away.team || {};
+  const homeTeam = home.team || {};
+  const awayFullName = awayTeam.displayName || awayTeam.shortDisplayName || '';
+  const homeFullName = homeTeam.displayName || homeTeam.shortDisplayName || '';
+  const awayAbbr = awayTeam.abbreviation || '';
+  const homeAbbr = homeTeam.abbreviation || '';
+  const broadcastNames = (competition?.broadcasts || []).flatMap(b => b.names || []).filter(Boolean);
+  const broadcastDisplay = broadcastNames.length > 0 ? broadcastNames.join(', ') : '';
+
+  const queryParams = new URLSearchParams({
+    eventId: eventId || '',
+    away: awayFullName,
+    home: homeFullName,
+    awayAbbr: awayAbbr,
+    homeAbbr: homeAbbr,
+    broadcast: broadcastDisplay
+  });
+
+  if (qualityTag) qualityTag.textContent = 'Searching feeds...';
+  if (serverSelect) {
+    serverSelect.innerHTML = '<option value="">Searching live streams from GitHub repo...</option>';
+    serverSelect.disabled = true;
+  }
+
+  fetch(`/api/game-stream?${queryParams.toString()}`)
+    .then(res => res.json())
+    .then(data => {
+      detailActiveServers = data.activeServers || [];
+      if (serverSelect) serverSelect.disabled = false;
+
+      if (detailActiveServers.length > 0) {
+        if (qualityTag) {
+          qualityTag.textContent = `${detailActiveServers.length} Live Feeds`;
+        }
+
+        // Render options for each matched stream from doms9/iptv repo
+        let optionsHTML = detailActiveServers.map(s => 
+          `<option value="${s.id}">${s.name}</option>`
+        ).join('');
+        optionsHTML += `<option value="custom">⚙ Custom .m3u8 Stream...</option>`;
+        if (serverSelect) serverSelect.innerHTML = optionsHTML;
+
+        // Restore saved server or default to first server
+        const savedServerId = localStorage.getItem(`nba_game_server_${eventId}`);
+        let targetServer = detailActiveServers.find(s => s.id === savedServerId) || detailActiveServers[0];
+
+        if (serverSelect) serverSelect.value = targetServer.id;
+        setupDetailTvServerControls(eventId, detailActiveServers, targetServer.id);
+        loadDetailGameStream(targetServer, autoPlay);
+
+      } else {
+        // No matches found in repo
+        if (qualityTag) qualityTag.textContent = 'No Feeds Found';
+        if (serverSelect) {
+          serverSelect.innerHTML = `
+            <option value="">No live game feed in directory</option>
+            <option value="custom">⚙ Custom .m3u8 Stream...</option>
+          `;
+        }
+        setupDetailTvServerControls(eventId, [], 'custom');
+        showDetailOverlay('No active live streams found for this game in the repository yet. You can use Custom .m3u8 Stream or check back closer to game time.', true);
+        updateDetailStreamStatus('error', 'No Stream');
+      }
+    })
+    .catch(err => {
+      console.error('Failed to load game streams:', err);
+      if (qualityTag) qualityTag.textContent = 'Error loading feeds';
+      if (serverSelect) {
+        serverSelect.disabled = false;
+        serverSelect.innerHTML = '<option value="custom">⚙ Custom .m3u8 Stream...</option>';
+      }
+      setupDetailTvServerControls(eventId, [], 'custom');
+      showDetailOverlay('Failed to connect to stream catalog. You can enter a custom .m3u8 URL.', true);
+      updateDetailStreamStatus('error', 'Error');
+    });
+
+  // Server selection dropdown handler (fallback sync)
+  if (serverSelect) {
+    serverSelect.onchange = (e) => {
+      const val = e.target.value;
+      setupDetailTvServerControls(eventId, detailActiveServers, val);
+      if (val === 'custom') {
+        const savedCustom = localStorage.getItem('nba_custom_stream_url') || '';
+        const inputUrl = prompt('Enter custom HLS (.m3u8) live stream URL:', savedCustom);
+        if (inputUrl && inputUrl.trim()) {
+          const customUrl = inputUrl.trim();
+          localStorage.setItem('nba_custom_stream_url', customUrl);
+          const customServer = {
+            id: 'custom',
+            name: 'Custom Stream URL',
+            url: customUrl,
+            referrer: '',
+            quality: 'Custom'
+          };
+          loadDetailGameStream(customServer, true);
+        } else {
+          if (currentDetailServerObj) {
+            serverSelect.value = currentDetailServerObj.id;
+          }
+        }
+        return;
+      }
+
+      const chosen = detailActiveServers.find(s => s.id === val);
+      if (chosen) {
+        localStorage.setItem(`nba_game_server_${eventId}`, chosen.id);
+        loadDetailGameStream(chosen, true);
+      }
+    };
+  }
+
+  // Retry button
+  if (retryBtn) {
+    retryBtn.onclick = () => {
+      if (currentDetailServerObj) {
+        loadDetailGameStream(currentDetailServerObj, true);
+      } else if (detailActiveServers.length > 0) {
+        loadDetailGameStream(detailActiveServers[0], true);
+      }
+    };
+  }
+
+  // Fullscreen button
+  if (fullscreenBtn) {
+    fullscreenBtn.onclick = () => {
+      if (!document.fullscreenElement) {
+        if (video.requestFullscreen) video.requestFullscreen();
+        else if (video.webkitRequestFullscreen) video.webkitRequestFullscreen();
+        else if (video.msRequestFullscreen) video.msRequestFullscreen();
+      } else {
+        if (document.exitFullscreen) document.exitFullscreen();
+      }
+    };
+  }
+
+  // Copy .m3u8 Link button
+  if (copyBtn) {
+    copyBtn.onclick = () => {
+      if (!currentDetailServerObj) return;
+      const proxyUrl = getEffectiveStreamUrl(currentDetailServerObj.url, currentDetailServerObj.referrer || '');
+      const fullCopyUrl = `${window.location.origin}${proxyUrl}`;
+      navigator.clipboard.writeText(fullCopyUrl).then(() => {
+        const orig = copyBtn.textContent;
+        copyBtn.textContent = 'Copied Link!';
+        copyBtn.style.color = '#4ade80';
+        setTimeout(() => {
+          copyBtn.textContent = orig;
+          copyBtn.style.color = '';
+        }, 2000);
+      }).catch(() => {
+        prompt('Copy stream URL:', fullCopyUrl);
+      });
+    };
+  }
+
+  // Video and scoreboard fit cleanly within the viewport
 }
 
 function initGameDetailListeners() {
@@ -2244,47 +3345,47 @@ function initGameDetailListeners() {
   document.querySelector('.game-detail-close').addEventListener('click', closeGameDetail);
   document.querySelector('.game-detail-backdrop').addEventListener('click', closeGameDetail);
   document.addEventListener('keydown', (e) => {
-    if (e.key === 'Escape') closeGameDetail();
+    if (e.key === 'Escape' || e.keyCode === 27 || e.keyCode === 10009 || e.keyCode === 461 || e.key === 'BrowserBack') {
+      closeGameDetail();
+    }
   });
 
-  // Click on game cards (delegate)
+  // Click delegation
   document.addEventListener('click', (e) => {
+    // 1. Direct Watch Live button on game card
+    const liveBtn = e.target.closest('.card-watch-live-btn');
+    if (liveBtn) {
+      e.preventDefault();
+      e.stopPropagation();
+      const eventId = liveBtn.getAttribute('data-event-id');
+      if (eventId) openGameDetail(eventId, true);
+      return;
+    }
+
+    // 2. Box score button on game card
+    const boxScoreBtn = e.target.closest('.card-btn-stats') || e.target.closest('.btn-boxscore');
+    if (boxScoreBtn) {
+      e.preventDefault();
+      e.stopPropagation();
+      const eventId = boxScoreBtn.getAttribute('data-event-id') || boxScoreBtn.closest('.game-card[data-event-id]')?.getAttribute('data-event-id');
+      if (eventId) openGameDetail(eventId, false);
+      return;
+    }
+
+    // 3. Whole game card click
     const card = e.target.closest('.game-card[data-event-id]');
     if (!card) return;
-    // Don't open modal if clicking a link inside the card
+    // Don't trigger if clicking an external link (like YouTube preview or highlights)
     if (e.target.closest('a')) return;
     const eventId = card.getAttribute('data-event-id');
-    if (eventId) openGameDetail(eventId);
+    if (eventId) openGameDetail(eventId, false);
   });
 }
 
 // ===== LIVE TV (IPTV / M3U) STREAM CONTROLLER =====
 
 let liveTvHls = null;
-let currentStreamSource = 'primary'; // 'primary', 'backup', 'custom'
-
-const LIVE_CHANNELS = {
-  primary: {
-    name: 'NBA TV Philippines',
-    url: 'http://23.237.104.106:8080/USA_NBA/index.m3u8',
-    quality: '1080p 60FPS'
-  },
-  backup: {
-    name: 'NBA TV Server 2',
-    url: 'http://23.237.104.106:8080/USA_NBA/tracks-v1a1/mono.m3u8',
-    quality: '1080p Direct Track'
-  }
-};
-
-function getEffectiveStreamUrl(rawUrl) {
-  // If running on HTTPS (e.g. Render production) or stream needs proxying to bypass CORS & mixed-content
-  const isHttps = window.location.protocol === 'https:';
-  const isHttpStream = rawUrl.startsWith('http://');
-  if (isHttps || isHttpStream) {
-    return `/api/iptv-proxy?url=${encodeURIComponent(rawUrl)}`;
-  }
-  return rawUrl;
-}
+let currentStreamSource = 'primary'; // 'primary', 'backup', 'server3', 'custom'
 
 function updateStreamStatus(status, text) {
   const pill = document.getElementById('stream-status-pill');
@@ -2434,19 +3535,29 @@ function loadLiveTvStream(sourceKey = null) {
 function startLiveTV() {
   const video = document.getElementById('livetv-video');
   if (!video) return;
-
-  if (!video.src && !liveTvHls) {
-    loadLiveTvStream(currentStreamSource);
-  } else {
-    video.play().catch(() => {});
-  }
+  video.style.display = '';
+  loadLiveTvStream(currentStreamSource);
 }
 
 function pauseLiveTV() {
   const video = document.getElementById('livetv-video');
-  if (video) {
-    video.pause();
+  if (liveTvHls) {
+    try {
+      liveTvHls.stopLoad();
+      liveTvHls.detachMedia();
+      liveTvHls.destroy();
+    } catch (e) {}
+    liveTvHls = null;
   }
+  if (video) {
+    try {
+      video.pause();
+      video.removeAttribute('src');
+      video.load();
+      video.style.display = 'none';
+    } catch (e) {}
+  }
+  updateStreamStatus('offline', 'Paused');
 }
 
 function openCustomStreamModal() {
@@ -2492,18 +3603,8 @@ function initLiveTv() {
     });
   }
 
-  // Channel select dropdown
-  const chanSelect = document.getElementById('channel-select');
-  if (chanSelect) {
-    chanSelect.addEventListener('change', (e) => {
-      const val = e.target.value;
-      if (val === 'custom') {
-        openCustomStreamModal();
-      } else {
-        loadLiveTvStream(val);
-      }
-    });
-  }
+  // TV-Friendly Server Selector & Controls for Live TV
+  setupLiveTvServerControls();
 
   // Reload stream button
   const refreshBtn = document.getElementById('livetv-refresh-btn');
@@ -2569,6 +3670,7 @@ function initLiveTv() {
   // Apply custom stream button
   const applyCustomBtn = document.getElementById('apply-custom-stream');
   const customInput = document.getElementById('custom-stream-input');
+  const chanSelect = document.getElementById('channel-select');
   if (applyCustomBtn && customInput) {
     applyCustomBtn.addEventListener('click', () => {
       const url = customInput.value.trim();
@@ -2576,6 +3678,8 @@ function initLiveTv() {
       localStorage.setItem('nba_custom_stream_url', url);
       closeCustomStreamModal();
       if (chanSelect) chanSelect.value = 'custom';
+      // Sync TV pills and trigger label
+      syncLiveTvActiveUI('custom');
       loadLiveTvStream('custom');
     });
   }
@@ -2595,8 +3699,262 @@ function initLiveTv() {
       if (customInput) customInput.value = '';
       closeCustomStreamModal();
       if (chanSelect) chanSelect.value = 'primary';
+      syncLiveTvActiveUI('primary');
       loadLiveTvStream('primary');
     });
+  }
+}
+
+// ===== TV-FRIENDLY SERVER SELECTOR FOR LIVE TV (NBA TV PHILIPPINES) =====
+
+function syncLiveTvActiveUI(val) {
+  const triggerLabel = document.getElementById('channel-select-label');
+  const pillsContainer = document.getElementById('livetv-server-pills');
+  const dropdownMenu = document.getElementById('channel-dropdown-menu');
+  const chanSelect = document.getElementById('channel-select');
+
+  // 1. Update quick pills
+  if (pillsContainer) {
+    pillsContainer.querySelectorAll('.tv-server-pill').forEach(pill => {
+      const pServer = pill.getAttribute('data-server');
+      pill.classList.toggle('active', pServer === val);
+    });
+  }
+
+  // 2. Update custom dropdown items
+  if (dropdownMenu) {
+    dropdownMenu.querySelectorAll('.tv-dropdown-item').forEach(item => {
+      const itemVal = item.getAttribute('data-value');
+      item.classList.toggle('active', itemVal === val);
+    });
+  }
+
+  // 3. Update trigger label
+  if (triggerLabel) {
+    if (val === 'primary') {
+      triggerLabel.textContent = 'NBA TV Philippines (Primary - 1080p)';
+    } else if (val === 'backup') {
+      triggerLabel.textContent = 'NBA TV Server 2 (Backup HD)';
+    } else if (val === 'server3') {
+      triggerLabel.textContent = 'NBA TV Server 3 (Live Feed)';
+    } else if (val === 'custom') {
+      triggerLabel.textContent = 'Custom M3U8 Stream URL';
+    }
+  }
+
+  // 4. Update hidden select
+  if (chanSelect && chanSelect.value !== val) {
+    chanSelect.value = val;
+  }
+}
+
+function setupLiveTvServerControls() {
+  const chanSelect = document.getElementById('channel-select');
+  const triggerBtn = document.getElementById('channel-select-trigger');
+  const dropdownMenu = document.getElementById('channel-dropdown-menu');
+  const pillsContainer = document.getElementById('livetv-server-pills');
+
+  // Handle pill clicks (instant 1-click on TV remote)
+  if (pillsContainer) {
+    pillsContainer.querySelectorAll('.tv-server-pill').forEach(pill => {
+      pill.addEventListener('click', (e) => {
+        e.preventDefault();
+        const serverKey = pill.getAttribute('data-server');
+        syncLiveTvActiveUI(serverKey);
+        if (dropdownMenu) dropdownMenu.classList.add('hidden');
+        if (serverKey === 'custom') {
+          openCustomStreamModal();
+        } else {
+          loadLiveTvStream(serverKey);
+        }
+      });
+    });
+  }
+
+  // Handle custom dropdown trigger toggle
+  if (triggerBtn && dropdownMenu) {
+    triggerBtn.addEventListener('click', (e) => {
+      e.preventDefault();
+      e.stopPropagation();
+      const isHidden = dropdownMenu.classList.contains('hidden');
+      document.querySelectorAll('.tv-custom-dropdown-menu').forEach(m => m.classList.add('hidden'));
+      if (isHidden) {
+        dropdownMenu.classList.remove('hidden');
+        triggerBtn.setAttribute('aria-expanded', 'true');
+        const activeOpt = dropdownMenu.querySelector('.tv-dropdown-item.active') || dropdownMenu.querySelector('.tv-dropdown-item');
+        if (activeOpt) activeOpt.focus();
+      } else {
+        dropdownMenu.classList.add('hidden');
+        triggerBtn.setAttribute('aria-expanded', 'false');
+      }
+    });
+
+    // Handle dropdown option clicks
+    dropdownMenu.querySelectorAll('.tv-dropdown-item').forEach(item => {
+      item.addEventListener('click', (e) => {
+        e.preventDefault();
+        const val = item.getAttribute('data-value');
+        syncLiveTvActiveUI(val);
+        dropdownMenu.classList.add('hidden');
+        triggerBtn.setAttribute('aria-expanded', 'false');
+        triggerBtn.focus();
+        if (val === 'custom') {
+          openCustomStreamModal();
+        } else {
+          loadLiveTvStream(val);
+        }
+      });
+    });
+  }
+
+  // Fallback select change listener
+  if (chanSelect) {
+    chanSelect.addEventListener('change', (e) => {
+      const val = e.target.value;
+      syncLiveTvActiveUI(val);
+      if (val === 'custom') {
+        openCustomStreamModal();
+      } else {
+        loadLiveTvStream(val);
+      }
+    });
+  }
+}
+
+// ===== TV MODE & REMOTE NAVIGATION SUPPORT =====
+
+function isTvDevice() {
+  const ua = (navigator.userAgent || '').toLowerCase();
+  const tvRegex = /(google[ _]?tv|android tv|smart[ -]?tv|hbbtv|appletv|pov_tv|tizen|webos|viera|bravia|netcast|roku|aftb|aftt|aftm|afts|crkey|mi[ -]?box|shield|tv\b)/i;
+  return tvRegex.test(ua);
+}
+
+// Measure TV screen dimensions dynamically and adjust layout variables & classes
+function autoAdjustForTvScreen() {
+  const vw = window.innerWidth || document.documentElement.clientWidth || screen.width;
+  const vh = window.innerHeight || document.documentElement.clientHeight || screen.height;
+  const isTv = document.body.classList.contains('tv-mode') || isTvDevice();
+
+  const root = document.documentElement;
+
+  // Calculate available vertical space for TV video
+  // Header: ~56-60px, Broadcast header: ~48-52px, Margins: ~20px
+  const reservedHeight = isTv ? 122 : 116;
+  let videoMaxH = Math.max(260, Math.min(vh - reservedHeight, Math.round(vw * (9 / 16))));
+  // Ensure player never overflows the TV viewport (leaves comfortable breathing room)
+  videoMaxH = Math.min(videoMaxH, Math.round(vh * 0.72));
+
+  root.style.setProperty('--tv-video-max-height', `${videoMaxH}px`);
+  root.style.setProperty('--tv-screen-w', `${vw}px`);
+  root.style.setProperty('--tv-screen-h', `${vh}px`);
+
+  // Set height-based layout classes for precise responsive scaling
+  document.body.classList.toggle('tv-height-compact', vh < 640);
+  document.body.classList.toggle('tv-height-standard', vh >= 640 && vh < 900);
+  document.body.classList.toggle('tv-height-spacious', vh >= 900);
+
+  // Set width-based classes
+  document.body.classList.toggle('tv-width-compact', vw < 1100);
+  document.body.classList.toggle('tv-width-standard', vw >= 1100 && vw < 1600);
+  document.body.classList.toggle('tv-width-widescreen', vw >= 1600);
+}
+
+function setTvMode(enabled) {
+  document.body.classList.toggle('tv-mode', enabled);
+  try {
+    localStorage.setItem('nba_tv_mode', enabled ? 'true' : 'false');
+  } catch (e) {}
+
+  const btn = document.getElementById('tv-mode-btn');
+  if (btn) {
+    btn.classList.toggle('active', enabled);
+    const textEl = btn.querySelector('.tv-mode-text');
+    if (textEl) textEl.textContent = enabled ? 'TV Mode ON' : 'TV Mode';
+  }
+
+  // Recalculate screen dimensions and layout
+  autoAdjustForTvScreen();
+}
+
+function initTvMode() {
+  let enable = false;
+  try {
+    const saved = localStorage.getItem('nba_tv_mode');
+    if (saved !== null) {
+      enable = saved === 'true';
+    } else {
+      enable = isTvDevice();
+    }
+  } catch (e) {
+    enable = isTvDevice();
+  }
+  setTvMode(enable);
+
+  const btn = document.getElementById('tv-mode-btn');
+  if (btn) {
+    btn.addEventListener('click', () => {
+      const current = document.body.classList.contains('tv-mode');
+      setTvMode(!current);
+    });
+  }
+
+  // Listen for screen size / orientation changes on TV or browser
+  window.addEventListener('resize', autoAdjustForTvScreen);
+  window.addEventListener('orientationchange', autoAdjustForTvScreen);
+  autoAdjustForTvScreen();
+
+  // Close any open custom TV dropdown menu when clicking anywhere else
+  document.addEventListener('click', (e) => {
+    if (!e.target.closest('.tv-custom-select-wrap')) {
+      document.querySelectorAll('.tv-custom-dropdown-menu').forEach(menu => {
+        menu.classList.add('hidden');
+      });
+      document.querySelectorAll('.tv-custom-select-trigger').forEach(b => {
+        b.setAttribute('aria-expanded', 'false');
+      });
+    }
+  });
+
+  // Global Remote Control (D-pad & Back) key handler
+  window.addEventListener('keydown', handleRemoteKeyNavigation);
+}
+
+function handleRemoteKeyNavigation(e) {
+  const key = e.key;
+  const code = e.keyCode;
+
+  // TV Remote Back / Escape keys
+  if (key === 'Escape' || code === 27 || code === 10009 || code === 461 || key === 'BrowserBack') {
+    // 1. Close open custom dropdown menus first
+    const openMenu = document.querySelector('.tv-custom-dropdown-menu:not(.hidden)');
+    if (openMenu) {
+      openMenu.classList.add('hidden');
+      e.preventDefault();
+      return;
+    }
+    // 2. Close Custom Stream Modal
+    const customModal = document.getElementById('custom-stream-modal');
+    if (customModal && !customModal.classList.contains('hidden')) {
+      closeCustomStreamModal();
+      e.preventDefault();
+      return;
+    }
+    // 3. Close Game Detail Modal
+    const detailModal = document.getElementById('game-detail-modal');
+    if (detailModal && !detailModal.classList.contains('hidden')) {
+      closeGameDetail();
+      e.preventDefault();
+      return;
+    }
+  }
+
+  // When navigating with D-pad Arrow keys, auto-scroll focused element into comfortable view
+  if (['ArrowUp', 'ArrowDown', 'ArrowLeft', 'ArrowRight'].includes(key)) {
+    setTimeout(() => {
+      if (document.activeElement && document.activeElement !== document.body) {
+        document.activeElement.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+      }
+    }, 40);
   }
 }
 
@@ -2608,5 +3966,6 @@ document.addEventListener('DOMContentLoaded', () => {
   initStandingsControls();
   initGameDetailListeners();
   initLiveTv();
+  initTvMode();
   loadGames().then(startCountdown);
 });

@@ -15,20 +15,20 @@ A live NBA scoreboard web app that displays real-time scores, standings, and gam
 
 ---
 
-## Live Game Streaming
+## Live Game Streaming (Direct In-App HLS / M3U)
 
-When a game is **currently live**, a **"WATCH LIVE"** button appears on the game card. Clicking it opens the game directly in the **StreamFree media player**.
-
-> **https://streamfree.app/player/basketball/{away-team}-vs-{home-team}**
+When a game is **currently live**, a pulsing **"WATCH LIVE"** button appears on the game card. Clicking it immediately opens the in-app broadcast player with real-time video streaming directly inside the project—**no external streaming websites or new browser tabs required**.
 
 ### How it works:
-1. The app detects live games via the ESPN API (`status.type.state === 'in'`)
-2. Team names are converted to URL slugs (e.g. "Los Angeles Lakers" → `los-angeles-lakers`)
-3. The server-side proxy (`/api/stream-link`) checks if the stream URL is valid:
-   - **Primary:** `{away-slug}-vs-{home-slug}` (e.g. `orlando-magic-vs-los-angeles-lakers`)
-   - **Fallback:** `{home-slug}-vs-{away-slug}` (tries reversed team order if primary fails)
-4. A red pulsing **📺 WATCH LIVE** button links directly to the working StreamFree player page
-5. The link opens in a new tab, going straight to the embedded media player (no manual searching needed)
+1. The app detects live games via the ESPN API (`status.type.state === 'in'`) and identifies the official broadcast network (e.g. ESPN, NBA TV).
+2. Clicking **"🔴 Watch Live"** on any card opens the Game Detail Modal and automatically initializes the **direct HLS video player**.
+3. **Multi-Server Streaming Support:**
+   - **Primary HD (1080p 60FPS)**: Official high-definition live game feed.
+   - **Server 2 (Direct Track)**: High-performance low-latency track.
+   - **Server 3 (Live Feed)**: Alternative live broadcast feed.
+   - **Custom M3U8 Stream URL**: Input your own custom stream link per game or globally.
+4. **Smart TV & IPTV Player Ready**: Copy direct `.m3u8` links or download `nbatv.m3u` for VLC, TiviMate, Smart IPTV, and OTT Navigator.
+5. **Theater & Fullscreen Mode**: Seamlessly hop into the widescreen Live TV tab or fullscreen for Smart TV viewing.
 
 ---
 
@@ -59,4 +59,4 @@ When a game is **currently live**, a **"WATCH LIVE"** button appears on the game
 - **Frontend:** Vanilla HTML, CSS, JavaScript
 - **Backend:** Node.js + Express (static file server)
 - **Data Source:** ESPN Public API
-- **Live Streams:** [StreamFree](https://streamfree.app/) (game-specific deep links with server-side URL validation)
+- **Live Streams:** Direct in-app HLS (.m3u / .m3u8) video streaming with multi-server IPTV proxy

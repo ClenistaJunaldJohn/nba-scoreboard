@@ -11,26 +11,32 @@
 </head>
 <body>
   <!-- Header -->
+  <!-- Unified Top Bar (NBA Brand + Navigation Tabs + Actions) -->
   <header class="header">
     <div class="header-left">
+      <span class="header-logo-icon">🏀</span>
       <span class="header-title">NBA</span>
     </div>
-  </header>
 
-  <!-- Tab Bar -->
-  <nav class="tab-bar">
-    <div class="tab-group">
+    <!-- Navigation Tab Group -->
+    <nav class="tab-group" role="tablist">
       <button class="tab active" data-tab="games">GAMES</button>
       <button class="tab" data-tab="standings">STANDINGS</button>
       <button class="tab" data-tab="powerrankings">POWER RANKINGS</button>
-    </div>
-    <div class="tab-bar-right">
+    </nav>
+
+    <!-- Header Actions (TV Mode & Live NBA TV) -->
+    <div class="header-actions">
+      <button class="tv-mode-btn" id="tv-mode-btn" title="Toggle TV Remote Friendly Mode" aria-label="Toggle TV Remote Mode">
+        <span class="tv-mode-icon">📺</span>
+        <span class="tv-mode-text">TV Mode</span>
+      </button>
       <button class="tab live-tv-tab-btn" data-tab="livetv" id="watch-nba-tv-btn" title="Watch Live NBA TV Philippines">
         <span class="live-dot-pulse"></span>
         Watch NBA TV
       </button>
     </div>
-  </nav>
+  </header>
 
   <!-- Main Content -->
   <main class="content">
@@ -273,27 +279,86 @@
     <!-- Live TV Tab (NBA TV Philippines) -->
     <section id="livetv-tab" class="tab-content">
       <div class="livetv-container">
-        <!-- Live TV Header / Controls Bar -->
+        <!-- Live TV Header / Controls Bar (Compact Broadcast Bar) -->
         <div class="livetv-header">
-          <div class="livetv-title-area">
-            <div class="livetv-badge-row">
-              <span class="livetv-live-tag"><span class="live-indicator-dot"></span> LIVE 24/7</span>
-              <span class="livetv-quality-tag">HD 1080p 60FPS</span>
-              <span class="livetv-format-tag">HLS / M3U</span>
-            </div>
+          <div class="livetv-broadcast-meta">
+            <span class="livetv-live-tag"><span class="live-indicator-dot"></span> LIVE 24/7</span>
             <h2 class="livetv-channel-name" id="current-channel-name">NBA TV Philippines</h2>
-            <p class="livetv-tagline">24/7 Live NBA Basketball coverage, live games, studio analysis, and highlights</p>
+            <span class="livetv-quality-tag">1080p 60FPS</span>
           </div>
 
-          <div class="livetv-channel-actions">
-            <div class="channel-selector-wrapper">
-              <label for="channel-select" class="channel-label">Stream Source / Server:</label>
-              <select id="channel-select" class="channel-select">
-                <option value="primary">NBA TV Philippines (Primary - 1080p)</option>
-                <option value="backup">NBA TV Server 2 (Backup HD)</option>
-                <option value="custom">Custom M3U8 Stream URL...</option>
-              </select>
+          <div class="livetv-controls-cluster">
+            <!-- Quick TV Server Switcher Pills (Instant 1-Click for TV Remotes) -->
+            <div class="tv-server-pills-bar" id="livetv-server-pills" role="radiogroup" aria-label="Stream Server">
+              <button type="button" class="tv-server-pill active" data-server="primary" tabindex="0" title="NBA TV Philippines 1080p 60FPS">
+                <span class="server-pill-status"></span>
+                <span class="server-pill-name">Primary 1080p</span>
+              </button>
+              <button type="button" class="tv-server-pill" data-server="backup" tabindex="0" title="NBA TV Server 2 Backup HD">
+                <span class="server-pill-status"></span>
+                <span class="server-pill-name">Server 2</span>
+              </button>
+              <button type="button" class="tv-server-pill" data-server="server3" tabindex="0" title="NBA TV Server 3 Live Feed">
+                <span class="server-pill-status"></span>
+                <span class="server-pill-name">Server 3</span>
+              </button>
+              <button type="button" class="tv-server-pill custom-pill" data-server="custom" tabindex="0" title="Custom M3U8 Stream URL">
+                <span class="server-pill-icon">⚙️</span>
+                <span class="server-pill-name">Custom URL</span>
+              </button>
             </div>
+
+            <!-- TV-Friendly Custom Dropdown (Kept in DOM for compatibility) -->
+            <div class="tv-custom-select-wrap hidden-on-wide" id="channel-custom-select-wrap">
+              <button type="button" class="tv-custom-select-trigger" id="channel-select-trigger" aria-haspopup="listbox" aria-expanded="false" tabindex="0">
+                <span class="tv-select-trigger-content">
+                  <span class="tv-select-icon">📡</span>
+                  <span class="tv-select-label" id="channel-select-label">NBA TV Philippines (Primary - 1080p)</span>
+                </span>
+                <span class="tv-select-chevron">
+                  <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><polyline points="6 9 12 15 18 9"/></svg>
+                </span>
+              </button>
+              <div class="tv-custom-dropdown-menu hidden" id="channel-dropdown-menu" role="listbox">
+                <button type="button" class="tv-dropdown-item active" data-value="primary" tabindex="0">
+                  <span class="dropdown-item-info">
+                    <span class="dropdown-item-title">NBA TV Philippines (Primary - 1080p)</span>
+                    <span class="dropdown-item-desc">Official 24/7 broadcast feed • 60FPS HD</span>
+                  </span>
+                  <span class="dropdown-item-check">✓</span>
+                </button>
+                <button type="button" class="tv-dropdown-item" data-value="backup" tabindex="0">
+                  <span class="dropdown-item-info">
+                    <span class="dropdown-item-title">NBA TV Server 2 (Backup HD)</span>
+                    <span class="dropdown-item-desc">High performance direct track • Low latency</span>
+                  </span>
+                  <span class="dropdown-item-check">✓</span>
+                </button>
+                <button type="button" class="tv-dropdown-item" data-value="server3" tabindex="0">
+                  <span class="dropdown-item-info">
+                    <span class="dropdown-item-title">NBA TV Server 3 (Live Feed)</span>
+                    <span class="dropdown-item-desc">Alternative direct 720p game feed</span>
+                  </span>
+                  <span class="dropdown-item-check">✓</span>
+                </button>
+                <button type="button" class="tv-dropdown-item custom-opt" data-value="custom" tabindex="0">
+                  <span class="dropdown-item-info">
+                    <span class="dropdown-item-title">⚙️ Custom M3U8 Stream URL...</span>
+                    <span class="dropdown-item-desc">Enter your own IPTV or tokenized stream</span>
+                  </span>
+                  <span class="dropdown-item-check">✓</span>
+                </button>
+              </div>
+            </div>
+
+            <!-- Native select hidden visually, kept synced for backwards compatibility -->
+            <select id="channel-select" class="channel-select sr-only-select" tabindex="-1" aria-hidden="true">
+              <option value="primary">NBA TV Philippines (Primary - 1080p)</option>
+              <option value="backup">NBA TV Server 2 (Backup HD)</option>
+              <option value="server3">NBA TV Server 3 (Live Feed)</option>
+              <option value="custom">Custom M3U8 Stream URL...</option>
+            </select>
+
             <div class="channel-action-btns">
               <button id="livetv-refresh-btn" class="tv-btn tv-btn-secondary" title="Reload live stream">
                 <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="M21.5 2v6h-6M2.5 22v-6h6M2 11.5a10 10 0 0 1 18.8-4.3M22 12.5a10 10 0 0 1-18.8 4.2"/></svg>
@@ -361,6 +426,7 @@
               <span class="preset-label">Quick Presets:</span>
               <button class="preset-btn" data-url="http://23.237.104.106:8080/USA_NBA/index.m3u8">NBA TV Feed 1 (1080p)</button>
               <button class="preset-btn" data-url="http://23.237.104.106:8080/USA_NBA/tracks-v1a1/mono.m3u8">NBA TV Direct Track</button>
+              <button class="preset-btn" data-url="http://198.58.104.90:8989/nba/index.m3u8">NBA TV Server 3 (Live Feed)</button>
               <button id="reset-stream-btn" class="preset-btn reset-preset-btn">Reset to Default</button>
             </div>
           </div>
@@ -410,10 +476,17 @@
   <!-- Game Detail Modal -->
   <div id="game-detail-modal" class="game-detail-modal hidden">
     <div class="game-detail-backdrop"></div>
-    <div class="game-detail-panel">
-      <button class="game-detail-close">&times;</button>
-      <div id="game-detail-content" class="game-detail-content">
-        <div class="loading">Loading game details...</div>
+    <div class="game-detail-dialog">
+      <button class="game-detail-close" aria-label="Close dialog" title="Close (Esc)">
+        <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">
+          <line x1="18" y1="6" x2="6" y2="18"></line>
+          <line x1="6" y1="6" x2="18" y2="18"></line>
+        </svg>
+      </button>
+      <div class="game-detail-panel">
+        <div id="game-detail-content" class="game-detail-content">
+          <div class="loading">Loading game details...</div>
+        </div>
       </div>
     </div>
   </div>

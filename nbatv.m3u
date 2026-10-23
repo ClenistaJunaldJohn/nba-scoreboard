@@ -3,3 +3,5 @@
 http://23.237.104.106:8080/USA_NBA/index.m3u8
 #EXTINF:-1 tvg-id="NBATV.us" tvg-name="NBA TV HD" tvg-logo="https://upload.wikimedia.org/wikipedia/en/thumb/d/d2/NBA_TV.svg/960px-NBA_TV.svg.png" group-title="Sports",NBA TV Server 2 (Direct Track - 1080p)
 http://23.237.104.106:8080/USA_NBA/tracks-v1a1/mono.m3u8
+#EXTINF:-1 tvg-id="NBATV3.us" tvg-name="NBA TV Live Feed" tvg-logo="https://upload.wikimedia.org/wikipedia/en/thumb/d/d2/NBA_TV.svg/960px-NBA_TV.svg.png" group-title="Sports",NBA TV Server 3 (Live Feed)
+http://198.58.104.90:8989/nba/index.m3u8
